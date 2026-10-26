@@ -1,0 +1,33 @@
+name: Spike
+description: Answer a question we can't answer yet. Timeboxed, no DoD.
+labels: ["type/spike"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: One question, specific enough that you'll know when it's answered.
+    validations:
+      required: true
+  - type: input
+    id: timebox
+    attributes:
+      label: Timebox
+      description: When you stop, answered or not.
+      placeholder: e.g. 3 days, or "until the Nov 1 sync"
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: Stop rule
+      description: What result ends the spike early (or tells us to give up).
+    validations:
+      required: true
+  - type: textarea
+    id: handin
+    attributes:
+      label: Hand in
+      description: What you'll post on this issue when you stop (table, plot, recommendation).
+    validations:
+      required: true
