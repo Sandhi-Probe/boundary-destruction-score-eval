@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Data never goes in git; data/README.md explains how it is rebuilt
+data/raw/*
+data/interim/*
+data/processed/*
+!data/*/.gitkeep
+
+# Model / tokenizer downloads
+.cache/
+hf_cache/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Local secrets
+.env
