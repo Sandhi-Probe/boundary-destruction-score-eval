@@ -10,6 +10,7 @@ Needs [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install
 git clone https://github.com/Sandhi-Probe/boundary-destruction-score-eval.git
 cd boundary-destruction-score-eval
 make setup   # .venv with the exact versions in uv.lock
+make data    # download the raw corpora and verify their checksums
 make check   # lint + tests; run before every PR
 ```
 

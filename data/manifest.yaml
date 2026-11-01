@@ -1,0 +1,18 @@
+# Every file in data/raw/, with where it came from. `make data` downloads anything
+# missing and fails if any checksum doesn't match. Convention: docs/adr/002-data-storage.md
+#
+#   path:      relative to data/raw/; first folder is the corpus (dcs/, uoh/); lowercase ASCII
+#   url:       the exact file, in double quotes; GitHub links pinned to a commit SHA
+#   sha256:    of the bytes as downloaded (shasum -a 256 <file>)
+#   retrieved: the day you took the checksum, YYYY-MM-DD
+#
+# Add entries under `files:` like this (indent with spaces):
+#
+#   - path: dcs/data-readme.md
+#     url: "https://raw.githubusercontent.com/OliverHellwig/sanskrit/8aeed5a1343d0e48b64eb32af8c00e8c6eb29359/dcs/data/readme.md"
+#     sha256: 418635b221dfe6675719ecfbfa170c1c28a6f35a2011cce0116c767797012d17
+#     retrieved: 2026-10-31
+#
+# The DCS and UoH entries come from #21.
+
+files:
