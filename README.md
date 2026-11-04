@@ -10,6 +10,7 @@ Needs [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install
 git clone https://github.com/Sandhi-Probe/boundary-destruction-score-eval.git
 cd boundary-destruction-score-eval
 make setup   # .venv with the exact versions in uv.lock
+make data    # download the raw corpora and verify their checksums
 make check   # lint + tests; run before every PR
 ```
 
@@ -26,7 +27,7 @@ src/sandhi_probe/
   probes/       probing classifiers on model activations
   paths.py      repo-relative paths; import these, don't hard-code
 tests/          pytest; mirrors src/
-data/           raw -> interim -> processed; gitignored, rebuilt by `make data`
+data/           manifest.yaml lists raw/; raw -> interim -> processed are gitignored
 notebooks/      exploration only; results move into src/ with a test
 configs/        experiment settings (YAML)
 docs/adr/       decision records: why we chose what we chose

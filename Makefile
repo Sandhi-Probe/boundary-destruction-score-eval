@@ -12,9 +12,12 @@ ifndef UV
 endif
 	uv sync --locked
 
-data: ## Download raw corpora, verify checksums, build data/processed
-	@echo "make data: not implemented yet."
-	@echo "  manifest + checksum check -> #17, corpora -> #21, extraction -> #23"
+data: ## Download raw corpora and verify checksums (OFFLINE=1: verify only)
+	@test -x .venv/bin/python || { echo "make data: no .venv yet. Run 'make setup' once while online."; exit 1; }
+	@# --no-sync: checking files only needs pyyaml + pydantic, so a pull that changes the
+	@# dependencies or .python-version can't make this need the network or rebuild .venv
+	uv run --no-sync python -m sandhi_probe.data.manifest $(if $(filter 1 yes true,$(OFFLINE)),--offline)
+	@# extraction into data/processed goes here (#23)
 
 check: ## Lint, format check and tests (run before every PR)
 	uv run ruff check .
