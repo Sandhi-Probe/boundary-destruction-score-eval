@@ -1,7 +1,7 @@
 """Raw-data manifest: where every file in data/raw/ comes from, and its SHA-256.
 
 `make data` runs this module. It downloads any manifest file that is missing from
-data/raw/, then checks the checksum of every file, so a fresh clone rebuilds data/raw/
+data/raw/ and checks the checksum of every file, so a fresh clone rebuilds data/raw/
 byte for byte or fails. Why a plain manifest and not DVC: docs/adr/002-data-storage.md.
 
     uv run python -m sandhi_probe.data.manifest            # download missing, verify all
@@ -20,7 +20,6 @@ import re
 import signal
 import socket
 import ssl
-import stat
 import sys
 import tempfile
 import time
@@ -28,7 +27,8 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path, PurePosixPath
@@ -43,20 +43,24 @@ USER_AGENT = (
     f"sandhi-probe/{__version__} (+https://github.com/Sandhi-Probe/boundary-destruction-score-eval)"
 )
 TIMEOUT_S = 30.0  # per socket operation, so a dead connection fails instead of hanging
-ATTEMPTS = 3  # only for errors after the server answered: dropped connection, 5xx, 429
+ATTEMPTS = 3  # only for errors after connecting: dropped connection, no response, 5xx, 429
 MAX_WAIT_S = 30.0  # cap on a server's Retry-After
 CHUNK = 1 << 20
 LOCK_NAME = ".make-data.lock"
 MAX_WARNINGS = 20
 
-# Lowercase ASCII only. macOS stores "ṃ" decomposed and Linux composed, and macOS treats
-# DCS/ and dcs/ as one folder while Linux doesn't, so anything else can name different
-# files on different laptops. A leading "." is reserved for temp and lock files.
+# Lowercase ASCII only. macOS treats DCS/ and dcs/, or the two Unicode forms of "ṃ", as one
+# name while Linux treats them as two, so anything else can name different files on
+# different laptops. A leading "." is reserved for temp and lock files.
 _SEGMENT = re.compile(r"[a-z0-9_-][a-z0-9._-]{0,99}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _CONFLICT = re.compile(r"^(<{7}|={7}|>{7})( |$)", re.MULTILINE)
 _GITHUB = {"github.com", "www.github.com"}
+_LOGIN_HINT = (
+    "On hotel or campus wifi this is usually a login page: log in through a browser"
+    " or try another network"
+)
 _JUNK = {".gitkeep", ".DS_Store", "Thumbs.db", "desktop.ini", LOCK_NAME}
 
 
@@ -80,9 +84,8 @@ class RawFile(BaseModel):
     @field_validator("path")
     @classmethod
     def _check_path(cls, v: str) -> str:
-        parts = v.split("/")
         if v.endswith(".part") or not all(
-            _SEGMENT.fullmatch(p) and not p.endswith(".") for p in parts
+            _SEGMENT.fullmatch(p) and not p.endswith(".") for p in v.split("/")
         ):
             raise ValueError(
                 f"{v!r}: use a relative path under data/raw/ made of lowercase a-z, 0-9, '.', '_'"
@@ -110,7 +113,7 @@ class RawFile(BaseModel):
             u.port  # noqa: B018 (raises ValueError on a bad port)
             host = (u.hostname or "").rstrip(".")
             host.encode("idna")  # raises UnicodeError on an empty or over-long label
-        except (ValueError, UnicodeError):
+        except ValueError:  # UnicodeError is one
             raise bad from None
         if u.scheme not in ("http", "https") or not host:
             raise bad
@@ -155,8 +158,8 @@ class Manifest(BaseModel):
 
     @field_validator("files", mode="before")
     @classmethod
-    def _empty_is_none(cls, v: object) -> object:
-        return [] if v in (None, "") else v
+    def _blank_means_no_files(cls, v: object) -> object:
+        return [] if v == "" else v  # BaseLoader reads a bare files: as ""
 
     @model_validator(mode="after")
     def _check_collisions(self) -> Manifest:
@@ -225,9 +228,8 @@ def load_manifest(path: Path) -> Manifest:
 def _describe_error(doc: dict, err: dict) -> str:
     loc = err["loc"]
     where = ".".join(str(x) for x in loc) or "files"
-    if len(loc) >= 2 and loc[0] == "files" and isinstance(loc[1], int):
-        files = doc.get("files")
-        entry = files[loc[1]] if isinstance(files, list) and loc[1] < len(files) else None
+    if len(loc) >= 2:  # ("files", index, ...)
+        entry = doc["files"][loc[1]]
         if isinstance(entry, dict) and isinstance(entry.get("path"), str):
             where += f" ({entry['path']})"
     msg = err["msg"].removeprefix("Value error, ")
@@ -254,11 +256,11 @@ class DownloadError(Exception):
     ) -> None:
         super().__init__(msg)
         self.unreachable = unreachable  # never reached the server
-        self.retryable = retryable  # the server answered, then something transient broke
+        self.retryable = retryable  # connected, then something transient broke
         self.retry_after = retry_after  # seconds, if the server said (429/503)
 
 
-def download(url: str, dest: Path, sha256: str, *, timeout: float = TIMEOUT_S) -> None:
+def download(url: str, dest: Path, sha256: str, *, timeout: float) -> None:
     """Download url to dest. dest only appears, atomically, once its checksum matches."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(1, ATTEMPTS + 1):
@@ -280,7 +282,7 @@ def _download_once(url: str, dest: Path, sha256: str, timeout: float) -> None:
         n = 0
         with os.fdopen(fd, "wb") as out, _open(req, timeout) as resp:
             os.fchmod(out.fileno(), 0o666 & ~_umask())  # mkstemp makes it 0600
-            length = resp.headers.get("Content-Length")
+            length = resp.headers.get("Content-Length", "")
             html = "text/html" in resp.headers.get("Content-Type", "")
             while True:
                 try:
@@ -299,7 +301,7 @@ def _download_once(url: str, dest: Path, sha256: str, timeout: float) -> None:
                     ) from None
                 h.update(chunk)
                 n += len(chunk)
-        if length is not None and length.isdigit() and n != int(length):
+        if length.isdigit() and n != int(length):
             raise DownloadError(
                 f"connection dropped: got {n:,} of {int(length):,} bytes", retryable=True
             )
@@ -319,11 +321,8 @@ def _mismatch_hint(url: str, html: bool) -> str:
     ref = _github_ref((u.hostname or "").rstrip("."), [p for p in u.path.split("/") if p])
     if ref is not None:
         return "A pinned commit can't change, so the sha256 or url in the manifest is wrong."
-    page = " The server sent a web page." if html and not u.path.endswith((".html", ".htm")) else ""
-    return (
-        f"{page} On hotel or campus wifi this is usually a login page: log in through a browser"
-        " or try another network. Otherwise upstream changed the file; open an issue."
-    ).lstrip()
+    page = "The server sent a web page. " if html and not u.path.endswith((".html", ".htm")) else ""
+    return f"{page}{_LOGIN_HINT}. Otherwise upstream changed the file; open an issue."
 
 
 def _quote_url(url: str) -> str:
@@ -341,28 +340,24 @@ def _quote_url(url: str) -> str:
 
 
 def _open(req: urllib.request.Request, timeout: float) -> http.client.HTTPResponse:
-    host = req.host
+    host = req.host  # read it now: urlopen overwrites it with the proxy's if there is one
     try:
         return urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as e:
         msg = f"HTTP {e.code} {str(e.reason).splitlines()[0]}"
-        retry_after = _seconds_header(e.headers.get("Retry-After"))
+        value = e.headers.get("Retry-After", "")
+        retry_after = float(value) if value.strip().isdigit() else None
         e.close()
-        if e.code >= 500 or e.code == 429:
-            raise DownloadError(msg, retryable=True, retry_after=retry_after) from None
-        raise DownloadError(msg) from None
+        retryable = e.code >= 500 or e.code == 429
+        raise DownloadError(msg, retryable=retryable, retry_after=retry_after) from None
     except urllib.error.URLError as e:
         # urllib wraps failures to connect or send: DNS, refused, connect timeout, TLS.
         raise DownloadError(_cant_connect(e.reason, host, timeout), unreachable=True) from None
     except (OSError, http.client.HTTPException) as e:
         # Raised unwrapped from getresponse(), so the request got there: the host is up.
         raise DownloadError(_no_response(e, host, timeout), retryable=True) from None
-    except ValueError as e:  # http.client.InvalidURL, a host that won't encode
+    except ValueError as e:  # a host that won't encode
         raise DownloadError(f"bad URL ({e})") from None
-
-
-def _seconds_header(value: str | None) -> float | None:
-    return float(value) if value and value.strip().isdigit() else None
 
 
 def _cant_connect(reason: object, host: str, timeout: float) -> str:
@@ -370,9 +365,7 @@ def _cant_connect(reason: object, host: str, timeout: float) -> str:
         return f"can't resolve {host}: check the URL, or you may be offline"
     if isinstance(reason, ssl.SSLCertVerificationError):
         return (
-            f"the TLS certificate for {host} isn't trusted ({reason.verify_message}). On hotel or"
-            " campus wifi this is usually a login page: log in through a browser or try another"
-            " network"
+            f"the TLS certificate for {host} isn't trusted ({reason.verify_message}). {_LOGIN_HINT}"
         )
     if isinstance(reason, TimeoutError):
         return f"timed out connecting to {host} after {timeout:g}s, are you offline?"
@@ -414,15 +407,8 @@ class Result:
         return self.status not in ("ok", "downloaded")
 
 
-def sync(
-    manifest: Manifest,
-    raw_dir: Path,
-    *,
-    offline: bool = False,
-    timeout: float = TIMEOUT_S,
-    log: Callable[[str], object] = print,
-) -> list[Result]:
-    """Download missing files (unless offline), then verify every file. Never overwrites a
+def sync(manifest: Manifest, raw_dir: Path, *, offline: bool, timeout: float) -> list[Result]:
+    """Download missing files (unless offline) and verify every file. Never overwrites a
     file that is already there: a mismatch is reported, not repaired."""
     results = []
     # scheme://host:port -> why its remaining files are skipped. One dead or overloaded host
@@ -431,34 +417,35 @@ def sync(
     for f in manifest.files:
         r = _sync_one(f, raw_dir / f.path, offline=offline, timeout=timeout, given_up=given_up)
         results.append(r)
-        log(_format(r))
+        print(_format(r))
     return results
 
 
 def _sync_one(
     f: RawFile, dest: Path, *, offline: bool, timeout: float, given_up: dict[str, str]
 ) -> Result:
+    u = urllib.parse.urlsplit(f.url)
+    origin = f"{u.scheme}://{u.netloc.lower()}"
     try:
-        if dest.is_symlink() and not dest.exists():
-            return Result(f.path, "error", f"broken symlink to {os.readlink(dest)}")
-        if dest.exists():
+        if dest.is_file():
             return _verify(f, dest)
+        if dest.exists():
+            return Result(f.path, "error", "exists but is not a regular file")
+        if dest.is_symlink():
+            return Result(f.path, "error", f"broken symlink to {os.readlink(dest)}")
         if offline:
             return Result(f.path, "missing", "not downloaded (offline)")
-        u = urllib.parse.urlsplit(f.url)
-        origin = f"{u.scheme}://{u.netloc.lower()}"
         if origin in given_up:
             return Result(f.path, "skipped", given_up[origin])
-        try:
-            download(f.url, dest, f.sha256, timeout=timeout)
-        except DownloadError as e:
-            first = str(e).splitlines()[0]
-            if e.unreachable:
-                given_up[origin] = f"{u.netloc} was unreachable earlier in this run ({first})"
-            elif e.retryable:
-                given_up[origin] = f"{u.netloc} kept failing earlier in this run ({first})"
-            return Result(f.path, "error", f"{f.url}\n{e}")
+        download(f.url, dest, f.sha256, timeout=timeout)
         return Result(f.path, "downloaded")
+    except DownloadError as e:
+        first = str(e).splitlines()[0]
+        if e.unreachable:
+            given_up[origin] = f"{u.netloc} was unreachable earlier in this run ({first})"
+        elif e.retryable:
+            given_up[origin] = f"{u.netloc} kept failing earlier in this run ({first})"
+        return Result(f.path, "error", f"{f.url}\n{e}")
     except OSError as e:
         return Result(f.path, "error", str(e))
     except Exception as e:  # one bad entry must not stop the rest being verified
@@ -466,8 +453,6 @@ def _sync_one(
 
 
 def _verify(f: RawFile, dest: Path) -> Result:
-    if not stat.S_ISREG(dest.stat().st_mode):
-        return Result(f.path, "error", "exists but is not a regular file")
     got = sha256_of(dest)
     if got == f.sha256:
         return Result(f.path, "ok")
@@ -489,7 +474,6 @@ def _format(r: Result) -> str:
 def untracked(manifest: Manifest, raw_dir: Path) -> list[str]:
     """A warning for each file in raw_dir that the manifest doesn't list."""
     listed = {f.path for f in manifest.files}
-    folded = {f.path.casefold(): f.path for f in manifest.files}
     warnings = []
     for p in _walk(raw_dir):
         if p.name in _JUNK or p.name.startswith("._") or _is_part(p.name):
@@ -497,8 +481,8 @@ def untracked(manifest: Manifest, raw_dir: Path) -> list[str]:
         rel = unicodedata.normalize("NFC", p.relative_to(raw_dir).as_posix())
         if rel in listed:
             continue
-        if rel.casefold() in folded:
-            warnings.append(f"{rel} is spelled {folded[rel.casefold()]} in the manifest; rename it")
+        if rel.casefold() in listed:  # manifest paths are lowercase, so casefold finds them
+            warnings.append(f"{rel} is spelled {rel.casefold()} in the manifest; rename it")
         else:
             warnings.append(
                 f"{rel} is not in the manifest: add it, or leave it if it's from another branch"
@@ -507,6 +491,7 @@ def untracked(manifest: Manifest, raw_dir: Path) -> list[str]:
 
 
 def _walk(root: Path) -> Iterator[Path]:
+    # Not redundant: is_dir() raises if a folder above lost its permissions, os.walk doesn't.
     if not root.is_dir():
         return
     for dirpath, _, filenames in os.walk(root):
@@ -518,14 +503,10 @@ def _is_part(name: str) -> bool:
     return name.startswith(".") and name.endswith(".part")
 
 
-class _Busy(Exception):
-    pass
-
-
 def _lock(raw_dir: Path) -> IO[str] | None:
     """Lock raw_dir for this run (released when the process exits), so cleaning up .part
     files can't delete another run's live download. None if the folder is read-only, in
-    which case verifying still works."""
+    which case verifying still works. BlockingIOError if another run holds the lock."""
     try:
         raw_dir.mkdir(parents=True, exist_ok=True)
         fh = (raw_dir / LOCK_NAME).open("a")
@@ -535,7 +516,7 @@ def _lock(raw_dir: Path) -> IO[str] | None:
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         fh.close()
-        raise _Busy from None
+        raise
     return fh
 
 
@@ -592,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         lock = _lock(raw)  # held until the process exits
-    except _Busy:
+    except BlockingIOError:
         print("make data: another `make data` is running on this folder; wait for it to finish")
         return 1
 
@@ -615,18 +596,15 @@ def main(argv: list[str] | None = None) -> int:
     if len(warnings) > MAX_WARNINGS:
         print(f"  warning     ...and {len(warnings) - MAX_WARNINGS} more unlisted files")
 
-    counts: dict[str, int] = {}
-    for r in results:
-        counts[r.status] = counts.get(r.status, 0) + 1
+    counts = Counter(r.status for r in results)
     summary = ", ".join(f"{v} {k}" for k, v in counts.items()) or "nothing to check"
-    failed = [r for r in results if r.failed]
-    if not failed:
+    if not any(r.failed for r in results):
         print(f"make data: ok ({summary})")
         return 0
     print(f"make data: FAILED ({summary})")
-    if any(r.status == "missing" for r in failed):
+    if "missing" in counts:
         print("  Run `make data` online (without OFFLINE=1) to download the missing files.")
-    elif any(r.status in ("error", "skipped") for r in failed):
+    elif "error" in counts:  # a skipped file always follows an error on the same host
         print(
             "  Files already here were still verified and finished downloads are kept;"
             " re-run once the problem above is fixed."

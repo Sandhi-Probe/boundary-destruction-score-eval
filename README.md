@@ -27,7 +27,7 @@ src/sandhi_probe/
   probes/       probing classifiers on model activations
   paths.py      repo-relative paths; import these, don't hard-code
 tests/          pytest; mirrors src/
-data/           raw -> interim -> processed; gitignored, rebuilt by `make data`
+data/           manifest.yaml lists raw/; raw -> interim -> processed are gitignored
 notebooks/      exploration only; results move into src/ with a test
 configs/        experiment settings (YAML)
 docs/adr/       decision records: why we chose what we chose

@@ -2,7 +2,7 @@
 # missing and fails if any checksum doesn't match. Convention: docs/adr/002-data-storage.md
 #
 #   path:      relative to data/raw/; first folder is the corpus (dcs/, uoh/); lowercase ASCII
-#   url:       the exact file, in double quotes; GitHub links pinned to a commit SHA
+#   url:       the exact file, in double quotes; GitHub links pinned to a full commit SHA
 #   sha256:    of the bytes as downloaded (shasum -a 256 <file>)
 #   retrieved: the day you took the checksum, YYYY-MM-DD
 #
