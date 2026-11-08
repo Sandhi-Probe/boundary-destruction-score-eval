@@ -1,0 +1,17 @@
+# Code owners, with usernames until we can implement github teams
+
+# Keep more specific paths lower
+
+# Data Engineering
+/data/                         @sparshshah19 @rickytang666 @eric7wu
+/src/sandhi_probe/data/        @sparshshah19 @rickytang666 @eric7wu
+/src/sandhi_probe/encoding/    @sparshshah19 @rickytang666 @eric7wu
+
+# ML Research
+/src/sandhi_probe/probes/      @CreativeLapse @nli33 @Moonlqht
+/src/sandhi_probe/metrics/     @CreativeLapse @nli33 @Moonlqht
+
+# Infrastructure
+/.github/                      @itavoro @jeojdi1
+/pyproject.toml                 @itavoro @jeojdi1
+/Makefile                      @itavoro @jeojdi1
