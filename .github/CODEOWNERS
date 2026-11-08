@@ -2,10 +2,13 @@
 
 # Keep more specific paths lower
 
+# Default (TPMs)
+*                              @TejasviniChawla @Impure-King
+
 # Data Engineering
-/data/                         @sparshshah19 @rickytang666 @eric7wu
-/src/sandhi_probe/data/        @sparshshah19 @rickytang666 @eric7wu
-/src/sandhi_probe/encoding/    @sparshshah19 @rickytang666 @eric7wu
+/data/                         @sparshshah19 @rickytang666 @eric7wu @Deeppcodes
+/src/sandhi_probe/data/        @sparshshah19 @rickytang666 @eric7wu @Deeppcodes
+/src/sandhi_probe/encoding/    @sparshshah19 @rickytang666 @eric7wu @Deeppcodes
 
 # ML Research
 /src/sandhi_probe/probes/      @CreativeLapse @nli33 @Moonlqht
@@ -13,5 +16,5 @@
 
 # Infrastructure
 /.github/                      @itavoro @jeojdi1
-/pyproject.toml                 @itavoro @jeojdi1
+/pyproject.toml                @itavoro @jeojdi1
 /Makefile                      @itavoro @jeojdi1
