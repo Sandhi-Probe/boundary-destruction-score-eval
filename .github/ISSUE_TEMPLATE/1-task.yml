@@ -1,0 +1,26 @@
+name: Task
+description: Work with a clear finish line (code, data, infra).
+labels: ["type/task"]
+body:
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What this unblocks, or why it matters now.
+    validations:
+      required: true
+  - type: textarea
+    id: dod
+    attributes:
+      label: Definition of done
+      description: Checkboxes a reviewer can verify. The PR has to meet every one.
+      placeholder: |
+        - [ ] `make data` writes data/processed/v0.1.parquet
+        - [ ] Tests cover the edge cases listed below
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes, links, blockers
+      description: Anything that blocks this, written as "Blocked by #N".

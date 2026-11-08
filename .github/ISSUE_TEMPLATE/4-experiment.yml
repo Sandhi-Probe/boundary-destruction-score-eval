@@ -1,0 +1,32 @@
+name: Experiment
+description: Test a hypothesis with a run. Timeboxed, no DoD.
+labels: ["type/experiment"]
+body:
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis
+      description: What you expect to see, and what result would prove it wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Models / tokenizers, dataset version, metric, seeds, config file.
+    validations:
+      required: true
+  - type: input
+    id: timebox
+    attributes:
+      label: Timebox
+      placeholder: e.g. 1 week
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: Stop rule
+      description: What result ends it early, or tells us to drop the idea.
+    validations:
+      required: true

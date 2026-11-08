@@ -1,0 +1,24 @@
+name: Docs
+description: Something to write down (guide, runbook, convention).
+labels: ["type/docs"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What needs writing, and for whom
+    validations:
+      required: true
+  - type: textarea
+    id: dod
+    attributes:
+      label: Definition of done
+      description: Checkboxes a reviewer can verify. The PR has to meet every one.
+      placeholder: |
+        - [ ] docs/... exists and is linked from the README
+        - [ ] A new member followed it without asking for help
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes, links, blockers

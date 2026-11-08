@@ -13,7 +13,7 @@ make setup   # .venv with the exact versions in uv.lock
 make check   # lint + tests; run before every PR
 ```
 
-Run `make` on its own to list every target.
+Run `make` on its own to list every target. Before your first PR, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Layout
 
