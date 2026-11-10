@@ -57,6 +57,12 @@ Each `rule_ids` key maps to its group and its Pāṇini sūtra. The list grows a
 | `savarna_dirgha` | vowel | 6.1.101 | `a + a → A` |
 | `yan` | vowel | 6.1.77 | `i → y` before a vowel |
 | `word_final_voicing` | consonant | 8.2.39 | `tat + api → tadapi` |
+| `visarga_s` | visarga | 8.3.34 | `H → s` before `t`: `rAmaH + tatra → rAmas tatra` |
+| `visarga_o` | visarga | 6.1.114 | `aH → o` before a voiced consonant: `rAmaH + gacCati → rAmo gacCati` |
+| `visarga_o_avagraha` | visarga | 6.1.113 | `aH + a → o '`: `rAmaH + atra → rAmo 'tra` |
+| `visarga_drop` | visarga | 8.3.19 | `H` drops before a vowel: `rAmaH + udakam → rAma udakam`. Optional: 8.3.17 first makes it `y`, and `rAmay udakam` is also valid |
+
+The visarga rules come from the grammar, not from extracted data yet. Adjust them once #23 runs. Sūtra numbers were checked against the [ashtadhyayi.com dataset](https://github.com/ashtadhyayi-com/data).
 
 ## Split rule
 

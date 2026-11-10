@@ -18,6 +18,10 @@ class RuleId(StrEnum):
     SAVARNA_DIRGHA = "savarna_dirgha"
     YAN = "yan"
     WORD_FINAL_VOICING = "word_final_voicing"
+    VISARGA_S = "visarga_s"
+    VISARGA_O = "visarga_o"
+    VISARGA_O_AVAGRAHA = "visarga_o_avagraha"
+    VISARGA_DROP = "visarga_drop"
 
 
 class Rule(NamedTuple):
@@ -31,6 +35,10 @@ RULES: dict[RuleId, Rule] = {
     RuleId.SAVARNA_DIRGHA: Rule(RuleClass.VOWEL, "6.1.101"),
     RuleId.YAN: Rule(RuleClass.VOWEL, "6.1.77"),
     RuleId.WORD_FINAL_VOICING: Rule(RuleClass.CONSONANT, "8.2.39"),
+    RuleId.VISARGA_S: Rule(RuleClass.VISARGA, "8.3.34"),
+    RuleId.VISARGA_O: Rule(RuleClass.VISARGA, "6.1.114"),
+    RuleId.VISARGA_O_AVAGRAHA: Rule(RuleClass.VISARGA, "6.1.113"),
+    RuleId.VISARGA_DROP: Rule(RuleClass.VISARGA, "8.3.19"),
 }
 
 
