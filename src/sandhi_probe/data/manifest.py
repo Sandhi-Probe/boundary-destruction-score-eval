@@ -6,11 +6,14 @@ byte for byte or fails. Why a plain manifest and not DVC: docs/adr/002-data-stor
 
     uv run python -m sandhi_probe.data.manifest            # download missing, verify all
     uv run python -m sandhi_probe.data.manifest --offline  # verify only, never download
+    uv run python -m sandhi_probe.data.manifest --fix      # also re-download files that fail
+                                                           # (`make data fix`)
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import http.client
@@ -30,7 +33,7 @@ import urllib.request
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import IO
 
@@ -47,6 +50,9 @@ ATTEMPTS = 3  # only for errors after connecting: dropped connection, no respons
 MAX_WAIT_S = 30.0  # cap on a server's Retry-After
 CHUNK = 1 << 20
 LOCK_NAME = ".make-data.lock"
+# --fix keeps the files it replaces in data/raw/.replaced/<run>/. Manifest paths can't start
+# with ".", so nothing listed can ever live there.
+REPLACED_DIR = ".replaced"
 MAX_WARNINGS = 20
 
 # Lowercase ASCII only. macOS treats DCS/ and dcs/, or the two Unicode forms of "ṃ", as one
@@ -399,36 +405,53 @@ def sha256_of(path: Path) -> str:
 @dataclass
 class Result:
     path: str
-    status: str  # ok | downloaded | missing | mismatch | error | skipped
+    status: str  # ok | downloaded | repaired | missing | mismatch | error | skipped
     detail: str = ""
 
     @property
     def failed(self) -> bool:
-        return self.status not in ("ok", "downloaded")
+        return self.status not in ("ok", "downloaded", "repaired")
 
 
-def sync(manifest: Manifest, raw_dir: Path, *, offline: bool, timeout: float) -> list[Result]:
-    """Download missing files (unless offline) and verify every file. Never overwrites a
-    file that is already there: a mismatch is reported, not repaired."""
+def sync(
+    manifest: Manifest, raw_dir: Path, *, offline: bool, timeout: float, fix: bool = False
+) -> list[Result]:
+    """Download missing files (unless offline) and verify every file. A file that is already
+    there and fails its checksum is reported, not overwritten. With fix (ignored offline), it
+    is moved to raw/.replaced/ and downloaded again, and put back if the new copy fails too."""
     results = []
     # scheme://host:port -> why its remaining files are skipped. One dead or overloaded host
     # costs one timeout (or one round of retries), not one per file.
     given_up: dict[str, str] = {}
-    for f in manifest.files:
-        r = _sync_one(f, raw_dir / f.path, offline=offline, timeout=timeout, given_up=given_up)
-        results.append(r)
-        print(_format(r))
+    aside = _Aside(raw_dir) if fix and not offline else None
+    try:
+        for f in manifest.files:
+            dest = raw_dir / f.path
+            r = _sync_one(f, dest, offline=offline, timeout=timeout, given_up=given_up, aside=aside)
+            results.append(r)
+            print(_format(r))
+    finally:
+        if aside is not None:
+            aside.tidy()
     return results
 
 
 def _sync_one(
-    f: RawFile, dest: Path, *, offline: bool, timeout: float, given_up: dict[str, str]
+    f: RawFile,
+    dest: Path,
+    *,
+    offline: bool,
+    timeout: float,
+    given_up: dict[str, str],
+    aside: _Aside | None = None,
 ) -> Result:
-    u = urllib.parse.urlsplit(f.url)
-    origin = f"{u.scheme}://{u.netloc.lower()}"
+    origin, _ = _origin(f.url)
     try:
         if dest.is_file():
-            return _verify(f, dest)
+            result = _verify(f, dest)
+            if result.status == "mismatch" and aside is not None:
+                return _repair(f, dest, result, aside, timeout=timeout, given_up=given_up)
+            return result
         if dest.exists():
             return Result(f.path, "error", "exists but is not a regular file")
         if dest.is_symlink():
@@ -440,16 +463,28 @@ def _sync_one(
         download(f.url, dest, f.sha256, timeout=timeout)
         return Result(f.path, "downloaded")
     except DownloadError as e:
-        first = str(e).splitlines()[0]
-        if e.unreachable:
-            given_up[origin] = f"{u.netloc} was unreachable earlier in this run ({first})"
-        elif e.retryable:
-            given_up[origin] = f"{u.netloc} kept failing earlier in this run ({first})"
+        _maybe_give_up(f.url, e, given_up)
         return Result(f.path, "error", f"{f.url}\n{e}")
     except OSError as e:
         return Result(f.path, "error", str(e))
     except Exception as e:  # one bad entry must not stop the rest being verified
         return Result(f.path, "error", f"unexpected {type(e).__name__}: {e}")
+
+
+def _origin(url: str) -> tuple[str, str]:
+    """(scheme://host:port, host:port) of url: the key and the name used to skip a host."""
+    u = urllib.parse.urlsplit(url)
+    return f"{u.scheme}://{u.netloc.lower()}", u.netloc
+
+
+def _maybe_give_up(url: str, e: DownloadError, given_up: dict[str, str]) -> None:
+    """Skip the rest of this host's files if e says the host is down or overloaded."""
+    origin, netloc = _origin(url)
+    first = str(e).splitlines()[0]
+    if e.unreachable:
+        given_up[origin] = f"{netloc} was unreachable earlier in this run ({first})"
+    elif e.retryable:
+        given_up[origin] = f"{netloc} kept failing earlier in this run ({first})"
 
 
 def _verify(f: RawFile, dest: Path) -> Result:
@@ -461,9 +496,83 @@ def _verify(f: RawFile, dest: Path) -> Result:
         "mismatch",
         f"expected {f.sha256}\ngot      {got}\n"
         "This file changed, or its manifest entry did (after a pull or branch switch, see\n"
-        "`git log -p data/manifest.yaml`). Move it out of data/raw/ rather than deleting it,\n"
-        "since it may be your only copy, then re-run `make data` online.",
+        "`git log -p data/manifest.yaml`). `make data fix` moves it to data/raw/.replaced/\n"
+        "(never deletes it: it may be your only copy) and downloads a fresh one.",
     )
+
+
+class _Aside:
+    """Where --fix keeps the files it replaces in one run: raw/.replaced/<time>-<random>/,
+    mirroring their paths under raw/. Created on first use."""
+
+    def __init__(self, raw_dir: Path) -> None:
+        self.root = raw_dir / REPLACED_DIR
+        self.dir: Path | None = None
+
+    def path_for(self, rel: str) -> Path:
+        if self.dir is None:
+            self.root.mkdir(exist_ok=True)
+            stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+            self.dir = Path(tempfile.mkdtemp(prefix=f"{stamp}-", dir=self.root))
+        p = self.dir / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
+    def tidy(self) -> None:
+        """Remove the folders this run made but didn't need, because every repair was undone."""
+        if self.dir is None:
+            return
+        for dirpath, _, _ in os.walk(self.dir, topdown=False):
+            with contextlib.suppress(OSError):  # not empty: it holds a replaced file
+                os.rmdir(dirpath)
+        with contextlib.suppress(OSError):
+            self.root.rmdir()
+
+
+def _repair(
+    f: RawFile,
+    dest: Path,
+    mismatch: Result,
+    aside: _Aside,
+    *,
+    timeout: float,
+    given_up: dict[str, str],
+) -> Result:
+    """--fix for a file that fails its checksum: move it aside, download a fresh copy, and
+    put the old one back if the fresh one fails too. The manifest is never changed: a
+    checksum that followed the download would accept anything."""
+    head = "".join(mismatch.detail.splitlines(keepends=True)[:2])  # the expected / got lines
+    if dest.is_symlink():
+        return Result(
+            f.path,
+            "mismatch",
+            f"{head}Not fixed: it's a symlink to {os.readlink(dest)}. Fix the file there.",
+        )
+    origin, _ = _origin(f.url)
+    if origin in given_up:
+        return Result(f.path, "mismatch", f"{head}Not fixed: {given_up[origin]}")
+    try:
+        kept = aside.path_for(f.path)
+        os.replace(dest, kept)  # same folder tree, so a rename: the file is never half-moved
+    except OSError as e:  # read-only folder, or raw/dcs/ is a link to another drive
+        return Result(
+            f.path, "mismatch", f"{head}Not fixed: couldn't move it aside, so it's untouched ({e})"
+        )
+    try:
+        download(f.url, dest, f.sha256, timeout=timeout)
+    except DownloadError as e:
+        os.replace(kept, dest)
+        _maybe_give_up(f.url, e, given_up)
+        return Result(
+            f.path,
+            "mismatch",
+            f"{head}Not fixed: a fresh download failed, so the file is back as it was:\n"
+            f"{f.url}\n{e}",
+        )
+    except BaseException:  # Ctrl-C, SIGTERM, a full disk: never leave the file moved away
+        os.replace(kept, dest)
+        raise
+    return Result(f.path, "repaired", f"old copy kept in {_rel(kept)}")
 
 
 def _format(r: Result) -> str:
@@ -491,10 +600,14 @@ def untracked(manifest: Manifest, raw_dir: Path) -> list[str]:
 
 
 def _walk(root: Path) -> Iterator[Path]:
+    """Every file under root, except the old copies --fix keeps in root/.replaced/."""
     # Not redundant: is_dir() raises if a folder above lost its permissions, os.walk doesn't.
     if not root.is_dir():
         return
-    for dirpath, _, filenames in os.walk(root):
+    top = os.fspath(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        if dirpath == top and REPLACED_DIR in dirnames:
+            dirnames.remove(REPLACED_DIR)
         for name in filenames:
             yield Path(dirpath) / name
 
@@ -555,6 +668,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--manifest", type=Path, default=paths.MANIFEST_PATH)
     ap.add_argument("--raw-dir", type=Path, default=paths.RAW_DIR)
     ap.add_argument("--offline", action="store_true", help="verify only, never download")
+    ap.add_argument(
+        "--fix",
+        action="store_true",
+        help="move files that fail their checksum to data/raw/.replaced/ and download them"
+        " again (no effect with --offline)",
+    )
     ap.add_argument("--timeout", type=_timeout, default=TIMEOUT_S, help="seconds per socket read")
     args = ap.parse_args(argv)
     raw = args.raw_dir.expanduser()
@@ -578,14 +697,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     n = len(manifest.files)
-    mode = " (offline: verify only)" if args.offline else ""
+    mode = ""
+    if args.offline:
+        mode = " (offline: verify only)"
+    elif args.fix:
+        mode = " (fix: re-download files that fail their checksum)"
     print(f"make data: {n} file(s) in {_rel(args.manifest)} -> {_rel(raw)}/{mode}")
     if lock is not None and (stale := _remove_partials(raw)):
         print(f"  removed {stale} leftover .part file(s) from an interrupted run")
     if not n:
         print("  manifest lists no files yet (corpora are added in #21)")
     try:
-        results = sync(manifest, raw, offline=args.offline, timeout=args.timeout)
+        results = sync(manifest, raw, offline=args.offline, timeout=args.timeout, fix=args.fix)
     except KeyboardInterrupt:
         print("\nmake data: interrupted. Partial downloads were removed; re-run to continue.")
         return 130
@@ -598,10 +721,18 @@ def main(argv: list[str] | None = None) -> int:
 
     counts = Counter(r.status for r in results)
     summary = ", ".join(f"{v} {k}" for k, v in counts.items()) or "nothing to check"
+    kept = (
+        f"  The old copies are in {_rel(raw / REPLACED_DIR)}/. Delete them once you're sure"
+        " you don't need them."
+    )
     if not any(r.failed for r in results):
         print(f"make data: ok ({summary})")
+        if "repaired" in counts:
+            print(kept)
         return 0
     print(f"make data: FAILED ({summary})")
+    if "repaired" in counts:
+        print(kept)
     if "missing" in counts:
         print("  Run `make data` online (without OFFLINE=1) to download the missing files.")
     elif "error" in counts:  # a skipped file always follows an error on the same host
