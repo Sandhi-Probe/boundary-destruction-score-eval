@@ -23,6 +23,8 @@ The first two run offline once `make setup` has run, even after a `git pull` tha
 - **The fresh copy matches:** the file is reported as `repaired`. The output says where the old copy went. `make data` never warns about `raw/.replaced/`, so delete it whenever you're sure you don't need it.
 - **The fresh copy doesn't match, or the download fails:** the output says `Not fixed:`, the original goes back where it was, and the run fails as before. The manifest entry or upstream needs a person to look; open an issue.
 
+If a fix run is killed mid-download (power loss, `kill -9`), the original stays in `raw/.replaced/`, and a failing `make data` reminds you it's there.
+
 It never changes `manifest.yaml`: a checksum that followed the download would accept anything. It leaves symlinked files alone, and does nothing with `OFFLINE=1`.
 
 ## Adding a raw file

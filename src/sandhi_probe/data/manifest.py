@@ -496,8 +496,9 @@ def _verify(f: RawFile, dest: Path) -> Result:
         "mismatch",
         f"expected {f.sha256}\ngot      {got}\n"
         "This file changed, or its manifest entry did (after a pull or branch switch, see\n"
-        "`git log -p data/manifest.yaml`). `make data fix` moves it to data/raw/.replaced/\n"
-        "(never deletes it: it may be your only copy) and downloads a fresh one.",
+        "`git log -p data/manifest.yaml`). Online, `make data fix` moves it to\n"
+        "data/raw/.replaced/ (never deletes it: it may be your only copy) and downloads a\n"
+        "fresh one.",
     )
 
 
@@ -514,6 +515,7 @@ class _Aside:
             self.root.mkdir(exist_ok=True)
             stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
             self.dir = Path(tempfile.mkdtemp(prefix=f"{stamp}-", dir=self.root))
+            self.dir.chmod(0o777 & ~_umask())  # mkdtemp makes it 0700; match the rest of raw/
         p = self.dir / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
@@ -561,7 +563,7 @@ def _repair(
     try:
         download(f.url, dest, f.sha256, timeout=timeout)
     except DownloadError as e:
-        os.replace(kept, dest)
+        _put_back(kept, dest)
         _maybe_give_up(f.url, e, given_up)
         return Result(
             f.path,
@@ -570,9 +572,18 @@ def _repair(
             f"{f.url}\n{e}",
         )
     except BaseException:  # Ctrl-C, SIGTERM, a full disk: never leave the file moved away
-        os.replace(kept, dest)
+        _put_back(kept, dest)
         raise
     return Result(f.path, "repaired", f"old copy kept in {_rel(kept)}")
+
+
+def _put_back(kept: Path, dest: Path) -> None:
+    try:
+        os.replace(kept, dest)
+    except OSError as e:
+        raise OSError(
+            f"couldn't put the original back ({e.strerror or e}); it is in {_rel(kept)}"
+        ) from None
 
 
 def _format(r: Result) -> str:
@@ -733,6 +744,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"make data: FAILED ({summary})")
     if "repaired" in counts:
         print(kept)
+    if any(p.is_file() for p in (raw / REPLACED_DIR).rglob("*")):  # e.g. a fix run was killed
+        print(f"  Earlier `make data fix` runs kept old copies in {_rel(raw / REPLACED_DIR)}/.")
     if "missing" in counts:
         print("  Run `make data` online (without OFFLINE=1) to download the missing files.")
     elif "error" in counts:  # a skipped file always follows an error on the same host

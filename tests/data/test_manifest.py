@@ -381,8 +381,9 @@ make data: 4 file(s) in {man} -> {raw}/
       expected {SHA}
       got      {got}
       This file changed, or its manifest entry did (after a pull or branch switch, see
-      `git log -p data/manifest.yaml`). `make data fix` moves it to data/raw/.replaced/
-      (never deletes it: it may be your only copy) and downloads a fresh one.
+      `git log -p data/manifest.yaml`). Online, `make data fix` moves it to
+      data/raw/.replaced/ (never deletes it: it may be your only copy) and downloads a
+      fresh one.
   ERROR       dcs/gone.txt
       {server.base}/gone.txt
       HTTP 404 Not Found
@@ -1015,6 +1016,14 @@ def test_fix_repairs_a_corrupted_file_and_keeps_the_old_copy(
     assert kept(raw) == {"dcs/a.txt": CORRUPT}
 
 
+def test_fix_folder_follows_the_umask(tmp_path: Path, server: Server, umask: int) -> None:
+    man, raw = serve(tmp_path, server, a=[OK])
+    put(raw, "dcs/a.txt", CORRUPT)
+    assert run(man, raw, "--fix") == 0
+    (run_dir,) = (raw / ".replaced").iterdir()
+    assert run_dir.stat().st_mode & 0o777 == 0o777 & ~umask  # not mkdtemp's 0700
+
+
 def test_fix_twice_never_overwrites_an_old_copy(tmp_path: Path, server: Server) -> None:
     man, raw = serve(tmp_path, server, a=[OK])
     for body in (b"first\n", b"second\n"):
@@ -1160,3 +1169,39 @@ def test_make_data_passes_the_flags(args: tuple[str, ...], flags: str) -> None:
         check=True,
     ).stdout
     assert f"uv run --no-sync python -m sandhi_probe.data.manifest{flags}" in out.splitlines()
+
+
+def test_failing_to_put_the_original_back_says_where_it_is(
+    tmp_path: Path, server: Server, monkeypatch: Patch, capsys: Capsys
+) -> None:
+    man, raw = serve(tmp_path, server, a=[Reply(404, b"gone")])
+    put(raw, "dcs/a.txt", CORRUPT)
+    real_replace = os.replace
+
+    def replace(src: object, dst: object) -> None:
+        if ".replaced" in str(src):  # moving aside works, putting back doesn't
+            raise OSError(errno.EROFS, "Read-only file system")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(m.os, "replace", replace)
+    assert run(man, raw, "--fix") == 1
+    (old,) = (raw / ".replaced").rglob("a.txt")
+    assert old.read_bytes() == CORRUPT
+    out = capsys.readouterr().out
+    assert (
+        "  ERROR       dcs/a.txt\n      couldn't put the original back (Read-only file system);"
+        f" it is in {old}\n"
+    ) in out
+    assert f"  Earlier `make data fix` runs kept old copies in {raw / '.replaced'}/.\n" in out
+
+
+def test_a_failed_run_points_at_old_copies(tmp_path: Path, capsys: Capsys) -> None:
+    # Say a fix run was killed mid-download: the file is only in .replaced/.
+    man, raw = project(tmp_path, entry())
+    put(raw, ".replaced/2026-11-14T120000-abc/dcs/a.txt", CORRUPT)
+    assert run(man, raw, "--offline") == 1
+    hint = f"  Earlier `make data fix` runs kept old copies in {raw / '.replaced'}/.\n"
+    assert hint in capsys.readouterr().out
+    put(raw)
+    assert run(man, raw, "--offline") == 0
+    assert hint not in capsys.readouterr().out  # only when something failed
