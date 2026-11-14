@@ -7,6 +7,7 @@ import errno
 import hashlib
 import io
 import os
+import shutil
 import signal
 import socket
 import ssl
@@ -380,8 +381,9 @@ make data: 4 file(s) in {man} -> {raw}/
       expected {SHA}
       got      {got}
       This file changed, or its manifest entry did (after a pull or branch switch, see
-      `git log -p data/manifest.yaml`). Move it out of data/raw/ rather than deleting it,
-      since it may be your only copy, then re-run `make data` online.
+      `git log -p data/manifest.yaml`). Online, `make data fix` moves it to
+      data/raw/.replaced/ (never deletes it: it may be your only copy) and downloads a
+      fresh one.
   ERROR       dcs/gone.txt
       {server.base}/gone.txt
       HTTP 404 Not Found
@@ -433,6 +435,7 @@ def test_existing_mismatch_fails_and_is_not_overwritten(
     assert run(man, raw) == 1
     assert (raw / "dcs/a.txt").read_bytes() == b"edited by hand\n"
     assert not server.hits
+    assert not (raw / ".replaced").exists()  # only FIX=1 moves anything
     assert "re-run once" not in capsys.readouterr().out  # it's not a download problem
 
 
@@ -960,3 +963,245 @@ def test_output_survives_a_non_unicode_terminal(tmp_path: Path, monkeypatch: Pat
     assert run(write(tmp_path, "files:\n"), tmp_path / "कुमार") == 0
     assert stdout.line_buffering
     assert b"\\u0915" in stdout.buffer.getvalue()
+
+
+# --- FIX=1: re-download files that fail their checksum (#46) ----------------------------------
+
+CORRUPT = b"agnim ile purohitam\r\n"  # say, an editor changed the line endings
+CORRUPT_SHA = hashlib.sha256(CORRUPT).hexdigest()
+CHANGED = b"upstream changed\n"
+
+
+def snapshot(p: Path) -> tuple[bytes, int]:
+    return p.read_bytes(), p.stat().st_mtime_ns
+
+
+def kept(raw: Path) -> dict[str, bytes]:
+    """The old copies FIX=1 kept, by their path under raw/.replaced/<run>/."""
+    root = raw / ".replaced"
+    return {
+        p.relative_to(root).as_posix().split("/", 1)[1]: p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file()
+    }
+
+
+def test_fix_repairs_a_corrupted_file_and_keeps_the_old_copy(
+    tmp_path: Path, server: Server, capsys: Capsys
+) -> None:
+    man, raw = serve(tmp_path, server, a=[OK], b=[OK])
+    put(raw, "dcs/a.txt", CORRUPT)
+    put(raw, "dcs/b.txt")
+    manifest_before = snapshot(man)
+    assert run(man, raw, "--fix") == 0
+    assert (raw / "dcs/a.txt").read_bytes() == BODY
+    assert server.hits == {"/a.txt": 1}  # b was fine, so it wasn't downloaded
+    assert kept(raw) == {"dcs/a.txt": CORRUPT}
+    assert snapshot(man) == manifest_before  # the manifest is never changed
+    (old,) = (raw / ".replaced").rglob("a.txt")
+    assert capsys.readouterr().out == (
+        f"make data: 2 file(s) in {man} -> {raw}/"
+        " (fix: re-download files that fail their checksum)\n"
+        f"  repaired    dcs/a.txt\n      old copy kept in {old}\n"
+        "  ok          dcs/b.txt\n"
+        "make data: ok (1 repaired, 1 ok)\n"
+        f"  The old copies are in {raw / '.replaced'}/. Delete them once you're sure you don't"
+        " need them.\n"
+    )
+    # Out of the way: a normal run neither warns about the old copy nor touches it.
+    assert run(man, raw) == 0
+    assert capsys.readouterr().out.endswith(
+        f"-> {raw}/\n  ok          dcs/a.txt\n  ok          dcs/b.txt\nmake data: ok (2 ok)\n"
+    )
+    assert kept(raw) == {"dcs/a.txt": CORRUPT}
+
+
+def test_fix_folder_follows_the_umask(tmp_path: Path, server: Server, umask: int) -> None:
+    man, raw = serve(tmp_path, server, a=[OK])
+    put(raw, "dcs/a.txt", CORRUPT)
+    assert run(man, raw, "--fix") == 0
+    (run_dir,) = (raw / ".replaced").iterdir()
+    assert run_dir.stat().st_mode & 0o777 == 0o777 & ~umask  # not mkdtemp's 0700
+
+
+def test_fix_twice_never_overwrites_an_old_copy(tmp_path: Path, server: Server) -> None:
+    man, raw = serve(tmp_path, server, a=[OK])
+    for body in (b"first\n", b"second\n"):
+        put(raw, "dcs/a.txt", body)
+        assert run(man, raw, "--fix") == 0
+    assert sorted(p.read_bytes() for p in (raw / ".replaced").rglob("a.txt")) == [
+        b"first\n",
+        b"second\n",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reply", "why"),
+    [
+        (
+            Reply(200, CHANGED),
+            "downloaded file doesn't match the manifest\n"
+            f"      expected {SHA}\n"
+            f"      got      {hashlib.sha256(CHANGED).hexdigest()} (17 bytes)\n",
+        ),
+        (Reply(404, b"gone"), "HTTP 404 Not Found\n"),
+    ],
+    ids=["fresh-copy-mismatches-too", "404"],
+)
+def test_fix_puts_the_original_back_when_the_fresh_download_fails(
+    tmp_path: Path, server: Server, capsys: Capsys, reply: Reply, why: str
+) -> None:
+    man, raw = serve(tmp_path, server, a=[reply])
+    put(raw, "dcs/a.txt", CORRUPT)
+    manifest_before = snapshot(man)
+    assert run(man, raw, "--fix") == 1
+    assert (raw / "dcs/a.txt").read_bytes() == CORRUPT
+    assert not (raw / ".replaced").exists()  # nothing kept, so no empty folders either
+    assert not list(raw.rglob("*.part"))
+    assert snapshot(man) == manifest_before
+    out = capsys.readouterr().out
+    assert (
+        f"  MISMATCH    dcs/a.txt\n      expected {SHA}\n      got      {CORRUPT_SHA}\n"
+        "      Not fixed: a fresh download failed, so the file is back as it was:\n"
+        f"      {server.base}/a.txt\n      {why}"
+    ) in out
+    assert out.endswith("make data: FAILED (1 mismatch)\n")
+
+
+def test_fix_interrupted_mid_download_puts_the_original_back(
+    tmp_path: Path, monkeypatch: Patch
+) -> None:
+    def ctrl_c(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    man, raw = project(tmp_path, entry())
+    put(raw, "dcs/a.txt", CORRUPT)
+    monkeypatch.setattr(m.urllib.request, "urlopen", ctrl_c)
+    assert run(man, raw, "--fix") == 130
+    assert (raw / "dcs/a.txt").read_bytes() == CORRUPT
+    assert not (raw / ".replaced").exists()
+    assert not list(raw.rglob("*.part"))
+
+
+def test_fix_does_nothing_offline(tmp_path: Path, server: Server, capsys: Capsys) -> None:
+    man, raw = serve(tmp_path, server, a=[OK])
+    put(raw, "dcs/a.txt", CORRUPT)
+    assert run(man, raw, "--offline") == 1
+    without_fix = capsys.readouterr().out
+    assert run(man, raw, "--offline", "--fix") == 1
+    assert capsys.readouterr().out == without_fix  # exactly as without FIX=1
+    assert not server.hits
+    assert (raw / "dcs/a.txt").read_bytes() == CORRUPT
+    assert not (raw / ".replaced").exists()
+
+
+def test_fix_and_an_unreachable_host(tmp_path: Path, capsys: Capsys) -> None:
+    dead = f"127.0.0.1:{closed_port()}"
+    man, raw = project(
+        tmp_path,
+        entry("dcs/a.txt", f"http://{dead}/a"),
+        entry("dcs/b.txt", f"http://{dead}/b"),
+        entry("dcs/c.txt", f"http://{dead}/c"),
+    )
+    put(raw, "dcs/a.txt", CORRUPT)
+    put(raw, "dcs/c.txt", CORRUPT)
+    assert run(man, raw, "--fix") == 1
+    assert (raw / "dcs/a.txt").read_bytes() == CORRUPT
+    assert (raw / "dcs/c.txt").read_bytes() == CORRUPT
+    out = capsys.readouterr().out
+    gone = f"{dead} was unreachable earlier in this run ({dead} refused the connection)"
+    assert f"      {dead} refused the connection\n  SKIPPED     dcs/b.txt\n      {gone}\n" in out
+    assert f"      Not fixed: {gone}\n" in out  # c: the host already failed
+
+
+def test_fix_leaves_a_symlinked_file_alone(tmp_path: Path, server: Server, capsys: Capsys) -> None:
+    man, raw = serve(tmp_path, server, a=[OK])
+    put(tmp_path, "drive/a.txt", CORRUPT)
+    (raw / "dcs").mkdir()
+    (raw / "dcs/a.txt").symlink_to(tmp_path / "drive/a.txt")
+    assert run(man, raw, "--fix") == 1
+    assert (raw / "dcs/a.txt").is_symlink()
+    assert (tmp_path / "drive/a.txt").read_bytes() == CORRUPT
+    assert not server.hits
+    assert (
+        f"      Not fixed: it's a symlink to {tmp_path / 'drive/a.txt'}. Fix the file there.\n"
+    ) in capsys.readouterr().out
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores folder permissions")
+def test_fix_in_a_read_only_folder_leaves_the_file_alone(
+    tmp_path: Path, server: Server, capsys: Capsys
+) -> None:
+    man, raw = serve(tmp_path, server, a=[OK])
+    put(raw, "dcs/a.txt", CORRUPT)
+    raw.chmod(0o555)
+    try:
+        assert run(man, raw, "--fix") == 1
+    finally:
+        raw.chmod(0o755)
+    assert (raw / "dcs/a.txt").read_bytes() == CORRUPT
+    assert not server.hits
+    assert "      Not fixed: couldn't move it aside, so it's untouched ([Errno 13]" in (
+        capsys.readouterr().out
+    )
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="needs make")
+@pytest.mark.parametrize(
+    ("args", "flags"),
+    [
+        (("data",), ""),
+        (("data", "fix"), " --fix"),
+        (("fix",), " --fix"),
+        (("data", "FIX=1"), " --fix"),
+        (("data", "OFFLINE=1"), " --offline"),
+        (("data", "fix", "OFFLINE=1"), " --offline --fix"),  # offline wins: see test above
+        (("data", "FIX=0"), ""),
+    ],
+)
+def test_make_data_passes_the_flags(args: tuple[str, ...], flags: str) -> None:
+    # make -n prints the commands without running them.
+    out = subprocess.run(
+        ["make", "-n", *args],
+        cwd=m.paths.REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert f"uv run --no-sync python -m sandhi_probe.data.manifest{flags}" in out.splitlines()
+
+
+def test_failing_to_put_the_original_back_says_where_it_is(
+    tmp_path: Path, server: Server, monkeypatch: Patch, capsys: Capsys
+) -> None:
+    man, raw = serve(tmp_path, server, a=[Reply(404, b"gone")])
+    put(raw, "dcs/a.txt", CORRUPT)
+    real_replace = os.replace
+
+    def replace(src: object, dst: object) -> None:
+        if ".replaced" in str(src):  # moving aside works, putting back doesn't
+            raise OSError(errno.EROFS, "Read-only file system")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(m.os, "replace", replace)
+    assert run(man, raw, "--fix") == 1
+    (old,) = (raw / ".replaced").rglob("a.txt")
+    assert old.read_bytes() == CORRUPT
+    out = capsys.readouterr().out
+    assert (
+        "  ERROR       dcs/a.txt\n      couldn't put the original back (Read-only file system);"
+        f" it is in {old}\n"
+    ) in out
+    assert f"  Earlier `make data fix` runs kept old copies in {raw / '.replaced'}/.\n" in out
+
+
+def test_a_failed_run_points_at_old_copies(tmp_path: Path, capsys: Capsys) -> None:
+    # Say a fix run was killed mid-download: the file is only in .replaced/.
+    man, raw = project(tmp_path, entry())
+    put(raw, ".replaced/2026-11-14T120000-abc/dcs/a.txt", CORRUPT)
+    assert run(man, raw, "--offline") == 1
+    hint = f"  Earlier `make data fix` runs kept old copies in {raw / '.replaced'}/.\n"
+    assert hint in capsys.readouterr().out
+    put(raw)
+    assert run(man, raw, "--offline") == 0
+    assert hint not in capsys.readouterr().out  # only when something failed

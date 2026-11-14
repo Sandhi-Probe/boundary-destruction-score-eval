@@ -13,9 +13,19 @@ Only this README, `manifest.yaml` and the `.gitkeep` files are committed. `make 
 ```bash
 make data            # download anything missing, verify every checksum
 make data OFFLINE=1  # verify only; never touches the network
+make data fix        # also repair files that fail their checksum (see below)
 ```
 
-Both run offline once `make setup` has run, even after a `git pull` that changed the dependencies, though a missing file then fails. Both report every file that doesn't match and exit with an error. Neither overwrites a file that's already in `raw/`. Both delete `.part` files left by a killed run and leave `raw/.make-data.lock` behind; ignore it.
+The first two run offline once `make setup` has run, even after a `git pull` that changed the dependencies, though a missing file then fails. Both report every file that doesn't match and exit with an error. Neither overwrites a file that's already in `raw/`. Both delete `.part` files left by a killed run and leave `raw/.make-data.lock` behind; ignore it.
+
+**`make data fix`** (or `make fix`, or `make data FIX=1`) repairs a file in `raw/` that fails its checksum. It moves the file to `raw/.replaced/<date>-<id>/` (never deletes it: it may be your only copy), downloads a fresh copy from the manifest URL, and checks it.
+
+- **The fresh copy matches:** the file is reported as `repaired`. The output says where the old copy went. `make data` never warns about `raw/.replaced/`, so delete it whenever you're sure you don't need it.
+- **The fresh copy doesn't match, or the download fails:** the output says `Not fixed:`, the original goes back where it was, and the run fails as before. The manifest entry or upstream needs a person to look; open an issue.
+
+If a fix run is killed mid-download (power loss, `kill -9`), the original stays in `raw/.replaced/`, and a failing `make data` reminds you it's there.
+
+It never changes `manifest.yaml`: a checksum that followed the download would accept anything. It leaves symlinked files alone, and does nothing with `OFFLINE=1`.
 
 ## Adding a raw file
 
@@ -31,7 +41,8 @@ Both run offline once `make setup` has run, even after a `git pull` that changed
 | `make data: no .venv yet` | Run `make setup` once while you're online. |
 | `can't resolve <host> ... you may be offline`, `was unreachable earlier in this run` | No network, or a typo in the host. That host's other files were skipped. Run it again when you're online. |
 | `TLS certificate ... isn't trusted` | Usually a hotel or campus wifi login page. Log in through a browser, or try another network. |
-| `MISMATCH` on a file you already had | If you just pulled or switched branches, the entry probably changed: see `git log -p data/manifest.yaml`. Move the file out of `raw/` instead of deleting it (it may be your only copy), then run `make data` online. |
+| `MISMATCH` on a file you already had | If you just pulled or switched branches, the entry probably changed: see `git log -p data/manifest.yaml`. Run `make data fix` online: it moves the file to `raw/.replaced/` (it may be your only copy) and downloads a fresh one. |
+| `Not fixed:` after `make data fix` | The fresh download didn't match either, or failed, so the file was left as it was. Read the lines under it: a network problem means re-run later; a mismatch on a pinned GitHub commit means the manifest entry is wrong. Otherwise open an issue. |
 | `doesn't match the manifest` right after a download | A wifi login page was served instead of the file, or upstream changed it. Try another network. If it still fails, open an issue so someone can check the change and update the entry. For a pinned GitHub commit, the entry itself is wrong. |
 | `HTTP 404` | The URL is wrong, or the file or commit is gone upstream. |
 | `kept failing earlier in this run` (`HTTP 429`, `5xx`, no response) | The server is overloaded or rate-limiting you. That host's other files were skipped. Wait a while, then re-run: finished downloads are kept. |
