@@ -628,7 +628,14 @@ def test_ctrl_c_removes_the_partial_download_and_exits_130(
     )
 
 
-@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP], ids=["sigterm", "sighup"])
+_signal_params = [
+    sig
+    for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None))
+    if sig is not None
+]
+
+
+@pytest.mark.parametrize("sig", _signal_params, ids=[sig.name.lower() for sig in _signal_params])
 def test_killed_mid_download_removes_the_part_file(
     tmp_path: Path, server: Server, sig: signal.Signals
 ) -> None:
@@ -778,18 +785,25 @@ def test_one_crashing_entry_does_not_stop_the_rest(
     assert "re-run once" not in out
 
 
+_mkfifo = getattr(os, "mkfifo", None)
+
+
 @pytest.mark.parametrize("flags", [(), ("--offline",)], ids=["online", "offline"])
 @pytest.mark.parametrize(
     ("create", "why"),
     [
         (Path.mkdir, "ERROR       dcs/a.txt\n      exists but is not a regular file\n"),
-        (os.mkfifo, "ERROR       dcs/a.txt\n      exists but is not a regular file\n"),
+        *(
+            [(_mkfifo, "ERROR       dcs/a.txt\n      exists but is not a regular file\n")]
+            if _mkfifo is not None
+            else []
+        ),
         (
             lambda p: p.symlink_to("/nowhere"),
             "ERROR       dcs/a.txt\n      broken symlink to /nowhere\n",
         ),
     ],
-    ids=["folder", "fifo", "broken-symlink"],
+    ids=["folder", *(["fifo"] if _mkfifo is not None else []), "broken-symlink"],
 )
 def test_non_regular_destination_is_an_error_not_a_hang(
     tmp_path: Path,
@@ -845,7 +859,10 @@ def test_second_run_on_the_same_folder_is_refused(tmp_path: Path, capsys: Capsys
     assert not live.exists()
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores folder permissions")
+_IS_ROOT = getattr(os, "geteuid", lambda: -1)() == 0
+
+
+@pytest.mark.skipif(_IS_ROOT, reason="root ignores folder permissions")
 def test_losing_access_to_the_folder_above_raw_is_not_ignored(tmp_path: Path) -> None:
     raw = tmp_path / "parent/raw"
     raw.mkdir(parents=True)
@@ -857,7 +874,10 @@ def test_losing_access_to_the_folder_above_raw_is_not_ignored(tmp_path: Path) ->
         raw.parent.chmod(0o755)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores folder permissions")
+_IS_ROOT = getattr(os, "geteuid", lambda: -1)() == 0
+
+
+@pytest.mark.skipif(_IS_ROOT, reason="root ignores folder permissions")
 def test_read_only_folder_is_verified_and_left_alone(tmp_path: Path, capsys: Capsys) -> None:
     man, raw = project(tmp_path, entry())
     put(raw)
