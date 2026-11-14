@@ -1,0 +1,79 @@
+# Every tokenizer we evaluate. The harness and the sweep read this file and nothing else,
+# so adding or dropping a tokenizer is a change here only. The four below were agreed with
+# the TPMs on 2026-11-08: one per tokenizer family. Loader and checks:
+# src/sandhi_probe/tokenizers/inventory.py
+#
+#   name:        short key used in results tables and file names; lowercase, unique
+#   hf_id:       Hugging Face repo the tokenizer is loaded from
+#   revision:    full commit SHA of that repo, so a re-run loads the same files
+#   family:      bpe-bytelevel      BPE over UTF-8 bytes (GPT-2 style)
+#                bpe-sentencepiece  BPE over characters, falls back to bytes for unknown ones
+#                unigram            SentencePiece Unigram
+#                wordpiece          BERT WordPiece
+#                bytes              no learned vocabulary: one token per UTF-8 byte
+#   vocab_size:  tokenizer.vocab_size, the learned vocabulary without added special tokens
+#   gated:       true if Hugging Face makes you request access before downloading
+#   licence:     licence id from the model card
+#   offsets:     true if tokenizer(..., return_offsets_mapping=True) works
+#   normalizer:  Unicode normalization applied before cutting: none, nfc or nfkc
+#   notes:       anything the harness or the paper has to handle
+#
+# Check every field against the Hub (needs network; gated ones need access + `hf auth login`):
+#   uv run python -m sandhi_probe.tokenizers.inventory --verify
+
+tokenizers:
+  - name: gpt2
+    hf_id: openai-community/gpt2
+    revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
+    family: bpe-bytelevel
+    vocab_size: 50257
+    gated: false
+    licence: mit
+    offsets: true
+    normalizer: none
+    notes: >-
+      Byte-level: a Devanagari character is 3 bytes and can be split across tokens, which
+      then share that character's offsets. SLP1 is ASCII, so there it is one byte per character.
+      The pre-tokenizer regex always splits at punctuation, so SLP1's ' (avagraha) and ~ start a
+      new token whatever the vocabulary says.
+
+  - name: gemma4
+    hf_id: google/gemma-4-E2B
+    revision: 433813a669639fd7eaa83155828e9000ed357d53
+    family: bpe-sentencepiece
+    vocab_size: 262144
+    gated: false
+    licence: apache-2.0
+    offsets: true
+    normalizer: none
+    notes: >-
+      Gemma 4 is not gated, unlike Gemma 2 and 3, so nobody needs access. Byte fallback means
+      unseen characters become byte tokens instead of <unk>.
+
+  - name: mt5
+    hf_id: google/mt5-small
+    revision: 73fb5dbe4756edadc8fbe8c769b0a109493acf7a
+    family: unigram
+    vocab_size: 250100
+    gated: false
+    licence: apache-2.0
+    offsets: true
+    normalizer: nfkc
+    notes: >-
+      The repo only has spiece.model, so loading needs the sentencepiece and protobuf packages
+      (without them transformers asks for tiktoken, which is the wrong fix). Can emit a bare
+      "▁" token whose offset overlaps the next token. Sanskrit is not in mT5's language list.
+
+  - name: byt5
+    hf_id: google/byt5-small
+    revision: 68377bdc18a2ffec8a0533fef03b1c513a4dd49d
+    family: bytes
+    vocab_size: 256
+    gated: false
+    licence: apache-2.0
+    offsets: false
+    normalizer: none
+    notes: >-
+      No fast tokenizer, so no offset_mapping. Each token is one UTF-8 byte (id = byte + 3),
+      so the harness can work out character offsets itself. len(tokenizer) is 384 with
+      special tokens and extra ids.

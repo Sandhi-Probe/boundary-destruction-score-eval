@@ -9,9 +9,12 @@ dependencies = [
     "matplotlib>=3.11.2",
     "numpy>=2.4.6",
     "pandas>=3.1.0",
+    "protobuf>=7.36.2",
     "pyarrow>=26.0.0",
     "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
+    # 0.2.3 ships no Intel Mac wheels, so `make setup` would compile it from source there
+    "sentencepiece>=0.2.1,<0.2.3",
     "transformers>=5.20.2",
 ]
 
@@ -39,6 +42,10 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+# tests/tokenizers/ mirrors src/; without this, ruff sorts the `tokenizers` library as our own code.
+known-third-party = ["tokenizers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
