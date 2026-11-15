@@ -442,6 +442,11 @@ def junction_for_pair(left: Tok, right: Tok) -> Junction | None:
     )
 
 
+def provenance_of(reconstructed: bool) -> Literal["gold", "reconstructed"]:
+    """Row provenance from DCS's MISC flag: gold unless UnsandhiedReconstructed."""
+    return "reconstructed" if reconstructed else "gold"
+
+
 def assign_split(sentence_id: str) -> Literal["train", "dev", "test"]:
     """train/dev/test from a stable hash of the sentence id (80/10/10)."""
     digest = hashlib.sha256(f"{SALT}/{sentence_id}".encode()).hexdigest()
@@ -477,14 +482,11 @@ def extract_rows(sents: list[Sent], stats: Stats) -> list[Pair]:
             if junctions is None:
                 stats.skipped_ambiguous += 1
                 continue
-            provenance: Literal["gold", "reconstructed"] = (
-                "gold" if not any(p.reconstructed for p in parts) else "reconstructed"
-            )
             pending.append(
                 PendingRow(
                     id=f"dcs-{parts[0].occ_id}",
                     fused=fusion.form,
-                    provenance=provenance,
+                    provenance=provenance_of(any(p.reconstructed for p in parts)),
                     sentence_id=sentence_id,
                     is_control=all(j.boundary_level == "intact" for j in junctions),
                     junctions=junctions,
@@ -514,14 +516,11 @@ def extract_rows(sents: list[Sent], stats: Stats) -> list[Pair]:
                 else:
                     stats.hiatus_pairs += 1
                 continue
-            provenance: Literal["gold", "reconstructed"] = (
-                "gold" if not (a.reconstructed or b.reconstructed) else "reconstructed"
-            )
             pending.append(
                 PendingRow(
                     id=f"dcs-{a.occ_id}",
                     fused=f"{a.form} {b.form}",
-                    provenance=provenance,
+                    provenance=provenance_of(a.reconstructed or b.reconstructed),
                     sentence_id=sentence_id,
                     is_control=junction.boundary_level == "intact",
                     junctions=[junction],
@@ -594,7 +593,7 @@ def check_row(row: Pair) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--raw", type=Path, default=RAW_DIR / RELATIVE_RAW)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--fixture-out", type=Path, default=None)
