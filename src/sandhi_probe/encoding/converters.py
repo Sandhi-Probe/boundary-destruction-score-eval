@@ -24,6 +24,8 @@ from indic_transliteration import sanscript
 CANONICAL = "slp1"
 
 _ENCODINGS = {"iast": sanscript.IAST}
+# What to_canonical accepts. "dcs_iast" is a source only: nothing writes DCS's markers back out.
+_SOURCES = (*_ENCODINGS, "dcs_iast")
 
 # DCS marker -> the IAST letter it stands for. Digraphs come before their first letter.
 _DCS_MARKERS = (
@@ -58,11 +60,12 @@ def normalize_dcs_iast(s: str) -> str:
 
 
 def to_canonical(s: str, src: str) -> str:
-    """Convert `s` from encoding `src` to SLP1."""
-    scheme = _scheme(src)
-    if src == "iast":
-        s = normalize_dcs_iast(s)
-    return sanscript.transliterate(s, scheme, sanscript.SLP1)
+    """Convert `s` from encoding `src` ("iast" or "dcs_iast") to SLP1."""
+    if src not in _SOURCES:
+        raise ValueError(f"unsupported encoding {src!r}; supported: {sorted(_SOURCES)}")
+    if src == "dcs_iast":
+        s, src = normalize_dcs_iast(s), "iast"
+    return sanscript.transliterate(unicodedata.normalize("NFC", s), _scheme(src), sanscript.SLP1)
 
 
 def from_canonical(s: str, dst: str) -> str:
