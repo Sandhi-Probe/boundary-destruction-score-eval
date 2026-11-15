@@ -1,7 +1,7 @@
 """Validation suite for the minimal-pair dataset (#24).
 
 Not implemented yet: 15 (frequency_bucket vs frequency) waits for the cutoffs, and
-24 (Devanagari round trip) waits for the encoding converters (#20).
+24 (Devanagari round trip) is a stub until the encoding converters land (#20).
 """
 
 import re
@@ -196,6 +196,11 @@ def slp1_only(pair: Pair) -> Iterator[str]:
             yield f"{name} {text!r} has non-SLP1 characters {bad}"
 
 
+def devanagari_round_trip(pair: Pair) -> Iterator[str]:
+    # stub until the converters land (#20): each text field must survive SLP1 -> Devanagari -> SLP1
+    yield from ()
+
+
 # Whole-dataset checks
 
 
@@ -257,6 +262,7 @@ ROW_CHECKS: list[tuple[int, Callable[[Pair], Iterator[str]]]] = [
     (14, frequency_at_least_one),
     (16, ids_match_corpus),
     (23, slp1_only),
+    (24, devanagari_round_trip),
 ]
 
 DatasetCheck = tuple[int, Level, Callable[[list[Pair]], Iterator[str]]]
