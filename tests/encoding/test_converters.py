@@ -1,6 +1,7 @@
 """IAST <-> SLP1 converters on the DCS Rigveda text (#20)."""
 
 import csv
+import unicodedata
 
 import pytest
 
@@ -56,6 +57,21 @@ def test_slp1_round_trip(slp1: str) -> None:
 def test_strict_iast() -> None:
     assert to_canonical("yajñasya", "iast") == "yajYasya"
     assert to_canonical("agnim īḻe purohitam", "iast") == "agnim ILe purohitam"
+
+
+@pytest.mark.parametrize(
+    ("src", "composed"), [("iast", "yajñasya kṛṣṇaḥ"), ("dcs_iast", "kṛṣTayaḥ īLe")]
+)
+def test_decomposed_input_gives_the_same_result(src: str, composed: str) -> None:
+    decomposed = unicodedata.normalize("NFD", composed)
+    assert decomposed != composed
+    assert to_canonical(decomposed, src) == to_canonical(composed, src)
+
+
+def test_outputs_are_nfc() -> None:
+    assert unicodedata.is_normalized("NFC", from_canonical("yajYasya kfzRaH ILe", "iast"))
+    decomposed = unicodedata.normalize("NFD", "kṛṣTayaḥ")
+    assert unicodedata.is_normalized("NFC", normalize_dcs_iast(decomposed))
 
 
 def test_vedic_l_is_not_the_vowel() -> None:
