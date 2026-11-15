@@ -45,6 +45,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from indic_transliteration import sanscript
 from indic_transliteration.sanscript import transliterate
@@ -107,7 +108,7 @@ class PendingRow:
 
     id: str
     fused: str
-    provenance: str  # "gold" or "reconstructed"
+    provenance: Literal["gold", "reconstructed"]  # matches Pair.split_provenance
     sentence_id: str
     is_control: bool
     junctions: list[Junction]
@@ -291,8 +292,8 @@ def classify_rule(
     return rule_class, ids
 
 
-def junction_from_parts(parts: list[str], fused: str) -> Junction | None:
-    """One junction between two neighbouring parts of a fused form, or None if ambiguous.
+def junction_from_parts(parts: list[str], fused: str) -> list[Junction] | None:
+    """The junctions between neighbouring parts of a fused form, or None if ambiguous.
 
     Aligns the unsandhied concatenation with the fused form from both ends; the
     middle stretch is what sandhi replaced. The junction must not reach into a
@@ -441,7 +442,7 @@ def junction_for_pair(left: Tok, right: Tok) -> Junction | None:
     )
 
 
-def assign_split(sentence_id: str) -> str:
+def assign_split(sentence_id: str) -> Literal["train", "dev", "test"]:
     """train/dev/test from a stable hash of the sentence id (80/10/10)."""
     digest = hashlib.sha256(f"{SALT}/{sentence_id}".encode()).hexdigest()
     bucket = int(digest[:8], 16) % 100
@@ -476,7 +477,9 @@ def extract_rows(sents: list[Sent], stats: Stats) -> list[Pair]:
             if junctions is None:
                 stats.skipped_ambiguous += 1
                 continue
-            provenance = "gold" if not any(p.reconstructed for p in parts) else "reconstructed"
+            provenance: Literal["gold", "reconstructed"] = (
+                "gold" if not any(p.reconstructed for p in parts) else "reconstructed"
+            )
             pending.append(
                 PendingRow(
                     id=f"dcs-{parts[0].occ_id}",
@@ -511,7 +514,9 @@ def extract_rows(sents: list[Sent], stats: Stats) -> list[Pair]:
                 else:
                     stats.hiatus_pairs += 1
                 continue
-            provenance = "gold" if not (a.reconstructed or b.reconstructed) else "reconstructed"
+            provenance: Literal["gold", "reconstructed"] = (
+                "gold" if not (a.reconstructed or b.reconstructed) else "reconstructed"
+            )
             pending.append(
                 PendingRow(
                     id=f"dcs-{a.occ_id}",
