@@ -1,14 +1,17 @@
-"""IAST <-> SLP1 (the canonical encoding), for the DCS Rigveda text.
+"""Convert between IAST and SLP1, the canonical encoding.
 
-"iast" here means the transcription DCS ships, not strict IAST: it writes some letters as ASCII
-capitals, and the library would turn those into the wrong sound (`T` -> t, `L` -> l, ...). So
-`to_canonical` first rewrites them as the IAST letters they stand for (see `normalize_dcs_iast`).
-A strict-IAST string with a legitimate capital `T`, `L`, `Q` or `W` would be rewritten too.
+Two source encodings are accepted by `to_canonical`:
+- "iast": strict IAST. `from_canonical` writes this too.
+- "dcs_iast": the transcription in the DCS Rigveda file. It is IAST except that it writes some
+  letters as ASCII capitals (`T`, `L`, `Q`, `W`) and uses `ṁ`, which the library would read as the
+  wrong sound (`T` -> t, `L` -> l). `normalize_dcs_iast` first rewrites them as the IAST letters
+  they stand for. A strict-IAST string with a real capital `T`, `L`, `Q` or `W` would be rewritten
+  too, so use "iast" for anything that is not DCS.
 
 Two letters need care with `indic-transliteration`:
 - Vedic ḷ (ळ, DCS `L`) must become `ḻ` (U+1E3B). With `ḷ` (U+1E37) the library reads the vowel ऌ
   and `īḷe` comes out as `Ixe`.
-- `ṁ` is left unconverted by the library, so it is rewritten as `ṃ`.
+- `ṁ` is left unconverted by the library, so DCS's `ṁ` is rewritten as `ṃ`.
 
 Known gap: 7 DCS lines end a word with `*`. It has no SLP1 equivalent, so it is passed through;
 `non_slp1_chars` reports it.
