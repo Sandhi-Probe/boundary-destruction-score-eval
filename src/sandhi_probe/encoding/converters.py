@@ -26,12 +26,12 @@ from indic_transliteration import sanscript
 
 CANONICAL = "slp1"
 
-_ENCODINGS = {"iast": sanscript.IAST}
+ENCODINGS = {"iast": sanscript.IAST}
 # What to_canonical accepts. "dcs_iast" is a source only: nothing writes DCS's markers back out.
-_SOURCES = (*_ENCODINGS, "dcs_iast")
+SOURCES = (*ENCODINGS, "dcs_iast")
 
 # DCS marker -> the IAST letter it stands for. Digraphs come before their first letter.
-_DCS_MARKERS = (
+DCS_MARKERS = (
     ("Th", "ṭh"),
     ("T", "ṭ"),
     ("Lh", "ḻh"),
@@ -42,40 +42,38 @@ _DCS_MARKERS = (
 )
 
 # ASCII letters, `|` (SLP1 for ळ्ह), the avagraha and the word separator.
-_SLP1_CHARS = frozenset(string.ascii_letters + "|' ")
+SLP1_CHARS = frozenset(string.ascii_letters + "|' ")
 
 
-def _scheme(name: str) -> str:
+def get_scheme(name: str) -> str:
     try:
-        return _ENCODINGS[name]
+        return ENCODINGS[name]
     except KeyError:
-        raise ValueError(
-            f"unsupported encoding {name!r}; supported: {sorted(_ENCODINGS)}"
-        ) from None
+        raise ValueError(f"unsupported encoding {name!r}; supported: {sorted(ENCODINGS)}") from None
 
 
 def normalize_dcs_iast(s: str) -> str:
     """Rewrite DCS's ASCII letter markers as the IAST letters they stand for (NFC)."""
     s = unicodedata.normalize("NFC", s)
-    for marker, letter in _DCS_MARKERS:
+    for marker, letter in DCS_MARKERS:
         s = s.replace(marker, letter)
     return unicodedata.normalize("NFC", s)
 
 
 def to_canonical(s: str, src: str) -> str:
     """Convert `s` from encoding `src` ("iast" or "dcs_iast") to SLP1."""
-    if src not in _SOURCES:
-        raise ValueError(f"unsupported encoding {src!r}; supported: {sorted(_SOURCES)}")
+    if src not in SOURCES:
+        raise ValueError(f"unsupported encoding {src!r}; supported: {sorted(SOURCES)}")
     if src == "dcs_iast":
         s, src = normalize_dcs_iast(s), "iast"
-    return sanscript.transliterate(unicodedata.normalize("NFC", s), _scheme(src), sanscript.SLP1)
+    return sanscript.transliterate(unicodedata.normalize("NFC", s), get_scheme(src), sanscript.SLP1)
 
 
 def from_canonical(s: str, dst: str) -> str:
     """Convert SLP1 text `s` to encoding `dst`, in NFC."""
-    return unicodedata.normalize("NFC", sanscript.transliterate(s, sanscript.SLP1, _scheme(dst)))
+    return unicodedata.normalize("NFC", sanscript.transliterate(s, sanscript.SLP1, get_scheme(dst)))
 
 
 def non_slp1_chars(s: str) -> set[str]:
     """Characters in `s` that are not SLP1 letters, `|`, `'` or a space (unconverted input)."""
-    return {c for c in s if c not in _SLP1_CHARS}
+    return {c for c in s if c not in SLP1_CHARS}
