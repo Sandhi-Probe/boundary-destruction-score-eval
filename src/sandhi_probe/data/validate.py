@@ -14,7 +14,8 @@ from sandhi_probe.data.schema import RULES, BoundaryLevel, Pair, RuleClass
 
 SLP1 = set("aAiIuUfFxXeEoOMH~kKgGNcCjJYwWqQRtTdDnpPbBmyrlvSzshL '")
 DCS_SOURCE_REF = re.compile(r"dcs-\d{4}/text-\d+/sent-\d+/tok-\d+")
-SPLIT_SHARE = {"train": 0.8, "dev": 0.1, "test": 0.1}
+Split = Literal["train", "dev", "test"]
+SPLIT_SHARE: dict[Split, float] = {"train": 0.8, "dev": 0.1, "test": 0.1}
 SPLIT_TOLERANCE = 0.05
 
 Level = Literal["error", "warning"]
