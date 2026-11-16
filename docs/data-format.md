@@ -35,7 +35,7 @@ All text and positions are in SLP1 (team decision).
 | `underlying_right` | str | letters from the right word before sandhi | `""` |
 | `surface` | str | what those letters became | `d` |
 | `rule_class` | str | vowel / visarga / consonant, or none if nothing changed | `consonant` |
-| `rule_ids` | list[str] | exact rules applied, keys from the rules table below. Empty for control rows | `["word_final_voicing"]` |
+| `rule_ids` | list[str] | exact rules applied, keys from the rules table below. Empty for control rows, or when the rule isn't in the table yet | `["word_final_voicing"]` |
 | `type` | str | `compound` (join inside a word) or `external` (join between two words) | `external` |
 | `boundary_level` | computed | intact / changed / merged (see below) | `changed` |
 
@@ -74,4 +74,4 @@ The visarga rules come from the grammar, not from extracted data yet. Adjust the
 ## Still open
 
 - Scoring criterion (#41) may add fields.
-- UoH `source_ref` and `sentence_id` format: TBD once #21 has the data.
+- `source_ref` and `sentence_id` formats: set by extraction (#23 for DCS, #21 for UoH). The examples above only show the idea.
