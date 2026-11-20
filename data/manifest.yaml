@@ -13,6 +13,27 @@
 #     sha256: 418635b221dfe6675719ecfbfa170c1c28a6f35a2011cce0116c767797012d17
 #     retrieved: 2026-10-31
 #
-# The DCS and UoH entries come from #21.
+# DCS entries are from #21 (CC BY 4.0, Oliver Hellwig), pinned to commit 8aeed5a.
+# UoH entries wait on the licence decision in #21.
 
 files:
+  - path: dcs/data-readme.md
+    url: "https://raw.githubusercontent.com/OliverHellwig/sanskrit/8aeed5a1343d0e48b64eb32af8c00e8c6eb29359/dcs/data/readme.md"
+    sha256: 418635b221dfe6675719ecfbfa170c1c28a6f35a2011cce0116c767797012d17
+    retrieved: 2026-10-31
+  - path: dcs/rigveda/pada-and-analysis.dat
+    url: "https://raw.githubusercontent.com/OliverHellwig/sanskrit/8aeed5a1343d0e48b64eb32af8c00e8c6eb29359/dcs/data/rigveda/pada-and-analysis.dat"
+    sha256: 9bb137b8bb9fa64a82f80e7d290d7834200523e5119996564daac24b56a4915b
+    retrieved: 2026-10-31
+  - path: dcs/rigveda/readme.md
+    url: "https://raw.githubusercontent.com/OliverHellwig/sanskrit/8aeed5a1343d0e48b64eb32af8c00e8c6eb29359/dcs/data/rigveda/readme.md"
+    sha256: d228530b41dd17386d82b52383af67902a7fa1a53250fb3f58a49fb404454dd8
+    retrieved: 2026-10-31
+  - path: dcs/conllu/readme.md
+    url: "https://raw.githubusercontent.com/OliverHellwig/sanskrit/8aeed5a1343d0e48b64eb32af8c00e8c6eb29359/dcs/data/conllu/readme.md"
+    sha256: ad68b0d7f740eb9161df9eef694563da4fb7f4621489af74b68fec4096b72cc8
+    retrieved: 2026-10-31
+  - path: dcs/conllu/kumarasambhava-01.conllu
+    url: "https://raw.githubusercontent.com/OliverHellwig/sanskrit/8aeed5a1343d0e48b64eb32af8c00e8c6eb29359/dcs/data/conllu/files/Kum%C4%81rasa%E1%B9%83bhava/Kum%C4%81rasa%E1%B9%83bhava-0000-KumSa%E1%B9%83%2C%201-7305.conllu"
+    sha256: 92ce81535948628939d2e21e5d3421af4f3dade7f821d60415c36c01853134df
+    retrieved: 2026-10-31
