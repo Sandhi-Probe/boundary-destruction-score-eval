@@ -17,7 +17,8 @@ data: ## Download raw corpora and verify checksums (OFFLINE=1: verify only)
 	@# --no-sync: checking files only needs pyyaml + pydantic, so a pull that changes the
 	@# dependencies or .python-version can't make this need the network or rebuild .venv
 	uv run --no-sync python -m sandhi_probe.data.manifest $(if $(filter 1 yes true,$(OFFLINE)),--offline)
-	@# extraction into data/processed goes here (#23)
+	@# issue #23: turn the Kumārasaṃbhava chapter 1 dump into minimal-pair rows
+	uv run --no-sync python -m sandhi_probe.data.extract
 
 check: ## Lint, format check and tests (run before every PR)
 	uv run ruff check .

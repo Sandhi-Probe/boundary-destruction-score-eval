@@ -11,7 +11,6 @@ byte for byte or fails. Why a plain manifest and not DVC: docs/adr/002-data-stor
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import http.client
 import io
@@ -33,6 +32,11 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path, PurePosixPath
 from typing import IO
+
+try:  # posix only; on windows the download lock is skipped, verification still works
+    import fcntl
+except ImportError:  # pragma: no cover - windows has no fcntl
+    fcntl = None  # type: ignore[assignment]
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
@@ -513,6 +517,8 @@ def _lock(raw_dir: Path) -> IO[str] | None:
     except OSError:
         return None
     try:
+        if fcntl is None:  # windows: no advisory locks, a run racing another is unlikely
+            return fh
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         fh.close()
@@ -614,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     # A closed terminal or a cancelled CI job unwinds like Ctrl-C, so .part files get removed.
-    for sig in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, lambda signum, _frame: sys.exit(128 + signum))
+    for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)):
+        if sig is not None:
+            signal.signal(sig, lambda signum, _frame: sys.exit(128 + signum))
     sys.exit(main())
