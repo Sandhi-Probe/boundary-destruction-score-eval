@@ -25,8 +25,11 @@ packages = ["src/sandhi_probe"]
 [dependency-groups]
 dev = [
     "ipykernel>=7.4.0",
+    "mypy>=2.4.1",
+    "pre-commit>=4.7.0",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
+    "types-pyyaml>=6.0.12.20261113",
 ]
 
 [tool.uv]
@@ -43,3 +46,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/sandhi_probe"]

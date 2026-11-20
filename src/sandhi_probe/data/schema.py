@@ -58,7 +58,7 @@ class Junction(BaseModel):
     rule_ids: list[RuleId] = []
     type: Literal["compound", "external"]
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def boundary_level(self) -> BoundaryLevel:
         if self.underlying_left + self.underlying_right == self.surface:

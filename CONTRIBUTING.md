@@ -54,3 +54,16 @@ Notebooks are for exploring. Before a result is cited (at a sync, in an ADR, in 
 ## Decisions
 
 Anything we don't want to re-argue gets an ADR in [`docs/adr/`](docs/adr/).
+
+## Automated checks
+
+Before submitting a PR, run `make check`.
+This runs Ruff linting, formatting, mypy, and pytest.
+
+After `make setup`, install the local hooks:
+
+    uv run pre-commit install
+
+To run every hook manually:
+
+    uv run pre-commit run --all-files

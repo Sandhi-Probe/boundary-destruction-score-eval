@@ -28,11 +28,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path, PurePosixPath
-from typing import IO
+from typing import IO, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
@@ -225,7 +225,7 @@ def load_manifest(path: Path) -> Manifest:
         raise ManifestError(f"{path}: invalid manifest\n" + "\n".join(lines)) from None
 
 
-def _describe_error(doc: dict, err: dict) -> str:
+def _describe_error(doc: dict, err: Mapping[str, Any]) -> str:
     loc = err["loc"]
     where = ".".join(str(x) for x in loc) or "files"
     if len(loc) >= 2:  # ("files", index, ...)
