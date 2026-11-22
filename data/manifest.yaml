@@ -16,3 +16,8 @@
 # The DCS and UoH entries come from #21.
 
 files:
+  # needed by the extraction test run (#23); the rest of the corpus is #21's scope
+  - path: dcs/conllu/kumarasambhava-01.conllu
+    url: "https://raw.githubusercontent.com/OliverHellwig/sanskrit/8aeed5a1343d0e48b64eb32af8c00e8c6eb29359/dcs/data/conllu/files/Kum%C4%81rasa%E1%B9%83bhava/Kum%C4%81rasa%E1%B9%83bhava-0000-KumSa%E1%B9%83%2C%201-7305.conllu"
+    sha256: 92ce81535948628939d2e21e5d3421af4f3dade7f821d60415c36c01853134df
+    retrieved: 2026-11-14
