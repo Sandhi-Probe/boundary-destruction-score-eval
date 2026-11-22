@@ -133,6 +133,17 @@ def test_visarga_rules() -> None:
 def test_anusvara_is_consonant() -> None:
     """m -> M is a consonant change, not a vowel one (review on #54)."""
     assert classify_rule("m", "", "M", 1) == (RuleClass.CONSONANT, [])
+    # a whole-part compound junction: the surface is the whole part, but the
+    # only change is still final m -> M
+    assert classify_rule("", "saKAnAm", "saKAnAM", 8) == (RuleClass.CONSONANT, [])
+
+
+def test_whole_part_consonant_change_is_consonant() -> None:
+    """Whole-part surfaces are judged by their changed letters (review on #54)."""
+    assert classify_rule("", "prayogAt", "prayogAd", 8) == (RuleClass.CONSONANT, [])
+    assert classify_rule("", "diS", "dik", 3) == (RuleClass.CONSONANT, [])
+    # a vowel change elsewhere in the part still makes it a vowel junction
+    assert classify_rule("", "Im", "iM", 2) == (RuleClass.VOWEL, [])
 
 
 def test_far_end_change_is_reverted() -> None:

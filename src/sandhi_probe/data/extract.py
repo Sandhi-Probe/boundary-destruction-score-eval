@@ -291,11 +291,20 @@ def classify_rule(
         return RuleClass.NONE, []
     if "H" in underlying_left + underlying_right or "H" in surface:
         return RuleClass.VISARGA, visarga_rules(underlying_left, underlying_right, surface)
-    touched = (
-        (underlying_left[-1:] + underlying_right[:1] + surface).replace(" ", "").replace("'", "")
-    )
-    # anusvāra M counts as a consonant for m -> M (review on #54)
-    is_consonant = touched and all(c in SLP1_CONSONANTS or c == "M" for c in touched)
+    # Classify by the letters that actually change. A whole-part compound
+    # junction's surface spans the whole part, so testing it wholesale would
+    # call any part containing a vowel a vowel change (review on #54).
+    underlying = (underlying_left + underlying_right).replace(" ", "")
+    surface_letters = surface.replace(" ", "")
+    changed = "".join(
+        underlying[i1:i2] + surface_letters[j1:j2]
+        for tag, i1, i2, j1, j2 in SequenceMatcher(
+            None, underlying, surface_letters, autojunk=False
+        ).get_opcodes()
+        if tag != "equal"
+    ).replace("'", "")
+    # anusvāra M counts as a consonant for m -> M
+    is_consonant = changed and all(c in SLP1_CONSONANTS or c == "M" for c in changed)
     rule_class = RuleClass.CONSONANT if is_consonant else RuleClass.VOWEL
 
     ids: list[RuleId] = []
