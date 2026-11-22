@@ -116,6 +116,43 @@ def test_check_7_ignores_spaces_in_fused() -> None:
     assert (7, "error") not in hits([VALID[3]])
 
 
+def test_check_7_allows_a_space_in_surface() -> None:
+    # rAmaH + atra -> rAmo 'tra
+    junction = Junction(
+        span=(3, 6),
+        cut=None,
+        underlying_left="aH",
+        underlying_right="a",
+        surface="o '",
+        rule_class="visarga",
+        type="external",
+    )
+    pair = make_pair("rAmo 'tra", ["rAmaH", "atra"], junction, 5)
+    assert not [issue for issue in validate([pair]) if issue.level == "error"]
+
+
+def test_check_10_changed_join_without_rule_ids_is_a_warning() -> None:
+    pair = BASE.model_copy(update={"junctions": [TADAPI.model_copy(update={"rule_ids": []})]})
+    assert (10, "warning") in hits([pair])
+    assert (10, "error") not in hits([pair])
+
+
+def test_check_10_intact_join_with_rule_ids_is_an_error() -> None:
+    junction = INTACT.model_copy(update={"rule_ids": ["guna"]})
+    pair = make_pair("rAmagfham", ["rAma", "gfham"], junction, 2)
+    assert (10, "error") in hits([pair])
+
+
+def test_check_16_accepts_the_extractor_source_ref() -> None:
+    pair = BASE.model_copy(
+        update={
+            "source_ref": "dcs-8aeed5a/chapter-7305/sent-485114/tok-4-5",
+            "sentence_id": "dcs-8aeed5a/chapter-7305/verse-1",
+        }
+    )
+    assert (16, "error") not in hits([pair])
+
+
 @pytest.mark.parametrize(
     ("check", "level", "other_changes"),
     [

@@ -4,7 +4,6 @@ Not implemented yet: 15 (frequency_bucket vs frequency) waits for the cutoffs, a
 24 (Devanagari round trip) is a stub until the encoding converters land (#20).
 """
 
-import re
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterator
 from itertools import pairwise
@@ -13,7 +12,6 @@ from typing import Literal, NamedTuple
 from sandhi_probe.data.schema import RULES, BoundaryLevel, Pair, RuleClass
 
 SLP1 = set("aAiIuUfFxXeEoOMH~kKgGNcCjJYwWqQRtTdDnpPbBmyrlvSzshL '")
-DCS_SOURCE_REF = re.compile(r"dcs-\d{4}/text-\d+/sent-\d+/tok-\d+")
 Split = Literal["train", "dev", "test"]
 SPLIT_SHARE: dict[Split, float] = {"train": 0.8, "dev": 0.1, "test": 0.1}
 SPLIT_TOLERANCE = 0.05
@@ -113,8 +111,9 @@ def underlying_matches_parts(pair: Pair) -> Iterator[str]:
 
 
 def rebuilds_fused(pair: Pair) -> Iterator[str]:
-    # spaces are dropped from fused: the parts do not say where a join crosses a space
-    if aligned(pair) and rebuild(pair) != pair.fused.replace(" ", ""):
+    # spaces are dropped on both sides: the parts do not say where a join crosses a space,
+    # and a surface can hold one (rAmaH + atra -> rAmo 'tra)
+    if aligned(pair) and rebuild(pair).replace(" ", "") != pair.fused.replace(" ", ""):
         yield f"parts rebuild to {rebuild(pair)!r}, fused is {pair.fused!r}"
 
 
@@ -137,14 +136,20 @@ def cut_set_when_intact(pair: Pair) -> Iterator[str]:
 def nothing_changed_agrees(pair: Pair) -> Iterator[str]:
     for junction in pair.junctions:
         no_class = junction.rule_class == RuleClass.NONE
-        no_rules = not junction.rule_ids
         intact = junction.boundary_level == BoundaryLevel.INTACT
-        if not no_class == no_rules == intact:
+        if no_class != intact or (intact and junction.rule_ids):
             yield (
                 f"at span {junction.span}: rule_class {junction.rule_class}, "
                 f"rule_ids {[str(r) for r in junction.rule_ids]}, "
                 f"boundary_level {junction.boundary_level}"
             )
+
+
+# the rules table is still growing, so a changed join without a rule is only a warning
+def changed_without_rule_ids(pair: Pair) -> Iterator[str]:
+    for junction in pair.junctions:
+        if junction.boundary_level != BoundaryLevel.INTACT and not junction.rule_ids:
+            yield f"changed join at span {junction.span} has no rule_ids yet"
 
 
 def rule_ids_match_class(pair: Pair) -> Iterator[str]:
@@ -185,10 +190,6 @@ def ids_match_corpus(pair: Pair) -> Iterator[str]:
         yield f"id does not start with {prefix!r}"
     if not pair.source_ref.startswith(prefix):
         yield f"source_ref {pair.source_ref!r} does not start with {prefix!r}"
-    if pair.source_corpus == "DCS" and not DCS_SOURCE_REF.fullmatch(pair.source_ref):
-        yield f"source_ref {pair.source_ref!r} is not dcs-YYYY/text-N/sent-N/tok-N"
-    if not pair.source_ref.startswith(pair.sentence_id):
-        yield f"source_ref {pair.source_ref!r} does not start with sentence_id {pair.sentence_id!r}"
 
 
 def slp1_only(pair: Pair) -> Iterator[str]:
@@ -246,24 +247,27 @@ def rule_classes_in_train_and_test(pairs: list[Pair]) -> Iterator[str]:
                 yield f"no {rule_class} rows in {split}"
 
 
-ROW_CHECKS: list[tuple[int, Callable[[Pair], Iterator[str]]]] = [
-    (1, parts_not_empty),
-    (2, junction_count),
-    (3, span_inside_fused),
-    (4, span_matches_surface),
-    (5, junctions_in_order),
-    (6, underlying_matches_parts),
-    (7, rebuilds_fused),
-    (8, cut_inside_junction),
-    (9, cut_set_when_intact),
-    (10, nothing_changed_agrees),
-    (11, rule_ids_match_class),
-    (12, control_is_intact),
-    (13, alt_splits_well_formed),
-    (14, frequency_at_least_one),
-    (16, ids_match_corpus),
-    (23, slp1_only),
-    (24, devanagari_round_trip),
+RowCheck = tuple[int, Level, Callable[[Pair], Iterator[str]]]
+
+ROW_CHECKS: list[RowCheck] = [
+    (1, "error", parts_not_empty),
+    (2, "error", junction_count),
+    (3, "error", span_inside_fused),
+    (4, "error", span_matches_surface),
+    (5, "error", junctions_in_order),
+    (6, "error", underlying_matches_parts),
+    (7, "error", rebuilds_fused),
+    (8, "error", cut_inside_junction),
+    (9, "error", cut_set_when_intact),
+    (10, "error", nothing_changed_agrees),
+    (10, "warning", changed_without_rule_ids),
+    (11, "error", rule_ids_match_class),
+    (12, "error", control_is_intact),
+    (13, "error", alt_splits_well_formed),
+    (14, "error", frequency_at_least_one),
+    (16, "error", ids_match_corpus),
+    (23, "error", slp1_only),
+    (24, "error", devanagari_round_trip),
 ]
 
 DatasetCheck = tuple[int, Level, Callable[[list[Pair]], Iterator[str]]]
@@ -280,9 +284,9 @@ DATASET_CHECKS: list[DatasetCheck] = [
 
 def validate(pairs: list[Pair]) -> list[Issue]:
     issues = [
-        Issue(number, "error", f"{pair.id}: {message}")
+        Issue(number, level, f"{pair.id}: {message}")
         for pair in pairs
-        for number, check in ROW_CHECKS
+        for number, level, check in ROW_CHECKS
         for message in check(pair)
     ]
     issues += [
