@@ -15,4 +15,4 @@ Don't rewrite an accepted decision. If it changes, write a new ADR and mark the 
 | ADR | Decision | Status |
 |---|---|---|
 | 001 | Canonical Sanskrit encoding (#19) | Planned |
-| — | Data storage and manifest (#17) | Planned |
+| [002](002-data-storage.md) | Data storage and manifest (#17) | Proposed |
