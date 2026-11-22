@@ -31,8 +31,13 @@ Known limits, each counted and reported at the end, never silently dropped
   are skipped: no sandhi acts at that join;
 - pairs where either word is itself part of a fused token are skipped: the row's
   ``fused`` string would misrepresent the source line;
-- rules outside the four in the schema's table get ``rule_ids=[]`` and are
-  counted as unmapped, so the rules table can grow (#22);
+- external rows keep only the change at their own join in ``fused``: a word's
+  change at its far end (caused by the neighbour on its other side) belongs to
+  that other row and is reverted, so every row rebuilds from its parts (#24);
+- pairs where a word changes in the middle (DCS's ``uttarAyAm`` against the
+  printed ``uttarasyAm``) are skipped: no junction can rebuild them;
+- rules outside the schema's table get ``rule_ids=[]`` and are counted as
+  unmapped, so the rules table can grow (#22, #47);
 - frequency is counted within this file only; corpus-wide counts need the full
   DCS download (#21).
 """
@@ -44,6 +49,7 @@ import hashlib
 import json
 from collections import Counter
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Literal
 
@@ -108,6 +114,7 @@ class PendingRow:
 
     id: str
     fused: str
+    freq_key: str  # printed form(s) the frequency is counted from
     provenance: Literal["gold", "reconstructed"]  # matches Pair.split_provenance
     sentence_id: str
     is_control: bool
@@ -134,6 +141,7 @@ class Stats:
     skipped_missing_occid: int = 0
     skipped_ambiguous: int = 0
     skipped_internal_only: int = 0
+    skipped_midword_change: int = 0
     skipped_adjacent_fusion: int = 0
     hiatus_pairs: int = 0
     text_mismatches: int = 0
@@ -258,18 +266,36 @@ def parse_conllu(path: Path) -> tuple[list[Sent], Stats]:
     return sents, stats
 
 
+def visarga_rules(underlying_left: str, underlying_right: str, surface: str) -> list[RuleId]:
+    """#47's visarga keys, matched against the change at the join."""
+    if surface and set(surface) <= set("sSz"):  # H -> s/ś/ṣ before a voiceless consonant
+        return [RuleId.VISARGA_S]
+    if (
+        surface.replace(" ", "") == "o'"
+        and underlying_left.endswith(("aH", "AH"))
+        and underlying_right[:1] in "aA"
+    ):
+        return [RuleId.VISARGA_O_AVAGRAHA]  # aH + a -> o ' (the avagraha marks the lost a)
+    if surface == "o" and underlying_left.endswith(("aH", "AH")):
+        return [RuleId.VISARGA_O]  # aH -> o before a voiced consonant
+    if not surface and underlying_left.endswith("H"):  # H drops
+        return [RuleId.VISARGA_DROP]
+    return []
+
+
 def classify_rule(
     underlying_left: str, underlying_right: str, surface: str, cut: int | None
 ) -> tuple[RuleClass, list[RuleId]]:
-    """rule_class plus any of the four rules the schema's table knows so far."""
+    """rule_class plus any rules the schema's table knows so far."""
     if underlying_left + underlying_right == surface:
         return RuleClass.NONE, []
     if "H" in underlying_left + underlying_right or "H" in surface:
-        return RuleClass.VISARGA, []
+        return RuleClass.VISARGA, visarga_rules(underlying_left, underlying_right, surface)
     touched = (
         (underlying_left[-1:] + underlying_right[:1] + surface).replace(" ", "").replace("'", "")
     )
-    is_consonant = touched and all(c in SLP1_CONSONANTS for c in touched)
+    # anusvāra M counts as a consonant for m -> M (review on #54)
+    is_consonant = touched and all(c in SLP1_CONSONANTS or c == "M" for c in touched)
     rule_class = RuleClass.CONSONANT if is_consonant else RuleClass.VOWEL
 
     ids: list[RuleId] = []
@@ -317,6 +343,10 @@ def junction_from_parts(parts: list[str], fused: str) -> list[Junction] | None:
         overlap = x_left + x_right - len(fused)
         if overlap > 0:  # one letter is claimed by both the prefix and the suffix run
             if surface_mid or overlap > len(parts[j]) or overlap > len(parts[j + 1]):
+                return None
+            if j + 1 < len(parts) - 1:
+                # the merged letter is part of the next part's start: the next
+                # junction would count it a second time and could not rebuild
                 return None
             span_start = x_left - overlap
             surface = fused[span_start:x_left]
@@ -398,47 +428,84 @@ def junction_from_parts(parts: list[str], fused: str) -> list[Junction] | None:
     return junctions
 
 
-def junction_for_pair(left: Tok, right: Tok) -> Junction | None:
+SANDHI_EDGE = 2  # sandhi across a space reaches at most two letters into a word
+
+
+def edit_blocks(unsandhied: str, printed: str) -> list[tuple[int, int, int, int]]:
+    """The differing slices of a word's unsandhied and printed forms.
+
+    Each block is (u_start, u_end, p_start, p_end); equal stretches between
+    blocks are unchanged letters.
+    """
+    matcher = SequenceMatcher(None, unsandhied, printed, autojunk=False)
+    return [(i1, i2, j1, j2) for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal"]
+
+
+def has_midword_change(left: Tok, right: Tok) -> bool:
+    """True when a word changes away from both of its edges.
+
+    A change at the seam is this row's job; a change at the far end belongs to
+    the row with the neighbour on that side. A change in the middle cannot be
+    rebuilt from any junction, so rows using that word would be broken.
+    """
+    for i1, i2, _, _ in edit_blocks(left.unsandhied, left.form):
+        if i1 > SANDHI_EDGE and i2 != len(left.unsandhied):
+            return True
+    for i1, i2, _, _ in edit_blocks(right.unsandhied, right.form):
+        if i1 != 0 and i2 < len(right.unsandhied) - SANDHI_EDGE:
+            return True
+    return False
+
+
+def seam_change(word: Tok, side: Literal["start", "end"]) -> tuple[str, str]:
+    """(underlying, printed) letters where this word changes at the seam."""
+    blocks = edit_blocks(word.unsandhied, word.form)
+    if not blocks:
+        return "", ""
+    if side == "end":
+        i1, i2, j1, j2 = blocks[-1]
+        if i2 != len(word.unsandhied) or j2 != len(word.form):
+            return "", ""  # the change stops short of the seam
+        return word.unsandhied[i1:], word.form[j1:]
+    i1, i2, j1, j2 = blocks[0]
+    if i1 != 0 or j1 != 0:
+        return "", ""
+    return word.unsandhied[:i2], word.form[:j2]
+
+
+def junction_for_pair(left: Tok, right: Tok) -> tuple[Junction, str] | None:
     """The junction between two adjacent words separated by a space, or None.
 
-    A junction exists only when a change touches the boundary itself: the left
-    word's final letters differ from its surface, or the right word's initial
-    letters do. A change inside one word away from the join (stem forms) is not
-    a junction. The space stays in fused, so spans may include it and cut is
-    always the space position.
+    Only the change at the seam is kept: fused is rebuilt from the unchanged
+    forms with this junction applied, so a word's change at its far end (caused
+    by its other neighbour, which is not in this row) is reverted and the row
+    rebuilds from its own parts (#24). The space stays in fused; spans may
+    include it and cut is always the space position.
     """
-    fused = f"{left.form} {right.form}"
-    space = len(left.form)
-    surface_left, surface_right = fused[:space], fused[space + 1 :]
-    x_left = common_prefix_len(left.unsandhied, surface_left)
-    s_left = common_suffix_len(left.unsandhied, surface_left)
-    x_right = common_prefix_len(right.unsandhied, surface_right)
-    s_right = common_suffix_len(right.unsandhied, surface_right)
-    touched_left = left.unsandhied != surface_left and s_left == 0
-    touched_right = right.unsandhied != surface_right and x_right == 0
-    if not (touched_left or touched_right):
+    under_left, over_left = seam_change(left, "end")
+    under_right, over_right = seam_change(right, "start")
+    if not (under_left or over_left or under_right or over_right):
         return None
-    under_left = left.unsandhied[x_left : len(left.unsandhied) - s_left]
-    over_left = surface_left[x_left : len(surface_left) - s_left]
-    under_right = right.unsandhied[x_right : len(right.unsandhied) - s_right]
-    over_right = surface_right[x_right : len(surface_right) - s_right]
-    if not touched_left:  # the change sits inside the word, not at this join
-        under_left = over_left = ""
-    if not touched_right:
-        under_right = over_right = ""
-    span_start = x_left if touched_left and over_left else space
-    span_end = space + 1 + len(over_right) if touched_right and over_right else space
+    clean_left = left.unsandhied[: len(left.unsandhied) - len(under_left)] + over_left
+    clean_right = over_right + right.unsandhied[len(under_right) :]
+    fused = f"{clean_left} {clean_right}"
+    space = len(clean_left)
+    span_start = space - len(over_left)
+    span_end = space + 1 + len(over_right) if over_right else space
     surface = fused[span_start:span_end]
     rule_class, rule_ids = classify_rule(under_left, under_right, surface, space)
-    return Junction(
-        span=(span_start, span_end),
-        cut=space,
-        underlying_left=under_left,
-        underlying_right=under_right,
-        surface=surface,
-        rule_class=rule_class,
-        rule_ids=rule_ids,
-        type="external",
+    return (
+        Junction(
+            span=(span_start, span_end),
+            cut=space,
+            underlying_left=under_left,
+            underlying_right=under_right,
+            surface=surface,
+            rule_class=rule_class,
+            rule_ids=rule_ids,
+            type="external",
+        ),
+        fused,
     )
 
 
@@ -486,6 +553,7 @@ def extract_rows(sents: list[Sent], stats: Stats) -> list[Pair]:
                 PendingRow(
                     id=f"dcs-{parts[0].occ_id}",
                     fused=fusion.form,
+                    freq_key=fusion.form,
                     provenance=provenance_of(any(p.reconstructed for p in parts)),
                     sentence_id=sentence_id,
                     is_control=all(j.boundary_level == "intact" for j in junctions),
@@ -509,17 +577,22 @@ def extract_rows(sents: list[Sent], stats: Stats) -> list[Pair]:
             if a.occ_id is None or b.occ_id is None:
                 stats.skipped_missing_occid += 1
                 continue
-            junction = junction_for_pair(a, b)
-            if junction is None:
+            found = junction_for_pair(a, b)
+            if found is None:
                 if a.form != a.unsandhied or b.form != b.unsandhied:
                     stats.skipped_internal_only += 1
                 else:
                     stats.hiatus_pairs += 1
                 continue
+            junction, fused = found
+            if has_midword_change(a, b):
+                stats.skipped_midword_change += 1
+                continue
             pending.append(
                 PendingRow(
                     id=f"dcs-{a.occ_id}",
-                    fused=f"{a.form} {b.form}",
+                    fused=fused,
+                    freq_key=f"{a.form} {b.form}",
                     provenance=provenance_of(a.reconstructed or b.reconstructed),
                     sentence_id=sentence_id,
                     is_control=junction.boundary_level == "intact",
@@ -550,7 +623,7 @@ def extract_rows(sents: list[Sent], stats: Stats) -> list[Pair]:
             stats.duplicate_ids += 1
             row_id = f"{row_id}m"
         seen.add(row_id)
-        head, _, tail = entry.fused.partition(" ")
+        head, _, tail = entry.freq_key.partition(" ")
         frequency = pair_forms[(head, tail)] if tail else forms[head]
         rows.append(
             Pair(
@@ -631,6 +704,7 @@ def main() -> None:
         "extract: skipped:"
         f" ambiguous={stats.skipped_ambiguous}"
         f" internal_only={stats.skipped_internal_only}"
+        f" midword_change={stats.skipped_midword_change}"
         f" adjacent_fusion={stats.skipped_adjacent_fusion}"
         f" missing_form={stats.skipped_missing_form}"
         f" missing_unsandhied={stats.skipped_missing_unsandhied}"
