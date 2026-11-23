@@ -1,12 +1,12 @@
 # data/
 
-Only this README, `manifest.yaml` and the `.gitkeep` files are committed. `make data` rebuilds `raw/` from the manifest's URLs and checksums. Why it works this way: [ADR-002](../docs/adr/002-data-storage.md).
+Only this README, `manifest.yaml`, `datasets.yaml` and the `.gitkeep` files are committed. `make data` rebuilds `raw/` from the manifest's URLs and checksums, and `make dataset` builds `processed/` from it. Why it works this way: [ADR-002](../docs/adr/002-data-storage.md).
 
 | Folder | What goes in it | Checked by |
 |---|---|---|
 | `raw/` | Corpora exactly as downloaded (DCS, UoH), one folder per corpus. Never edited by hand. | `manifest.yaml`: every listed file is verified; unlisted files get a warning |
-| `interim/` | Cleaned or re-encoded intermediates. Safe to delete. | nothing; rebuild it |
-| `processed/` | Versioned datasets the experiments read, e.g. `v0.1.parquet`. `make data` will build them (#23). | rebuilt deterministically from `raw/` + code |
+| `interim/` | Cleaned or re-encoded intermediates, including the rows extraction writes (`*.jsonl`). Safe to delete. | nothing; rebuild it |
+| `processed/` | Versioned datasets the experiments read, e.g. `v0.1.parquet`. `make dataset` builds them. | `datasets.yaml`: each build has to match its committed SHA-256 |
 
 ## Commands
 
@@ -23,6 +23,25 @@ Both run offline once `make setup` has run, even after a `git pull` that changed
 2. Download it and take the checksum: `shasum -a 256 <file>`.
 3. Add an entry under `files:` in `manifest.yaml`, using the example at the top of that file. The `path` is lowercase ASCII only, so `dcs/conllu/kumarasambhava-01.conllu`, not the original name with diacritics.
 4. Delete your local copy and run `make data`. It should download the file and pass.
+
+## Building the dataset
+
+```bash
+make dataset   # make data, then build processed/v0.1.parquet and check its SHA-256
+```
+
+`make dataset` reads the rows extraction writes to `interim/*.jsonl` (#23), checks every row against the schema and the validation suite (`src/sandhi_probe/data/validate.py`), and writes `processed/v0.1.parquet`. Rows are sorted by `id` and the Parquet layout is fixed in code, so the same rows always give the same bytes. The file's SHA-256 then has to match `datasets.yaml`.
+
+| Output | What it means |
+|---|---|
+| `ok` | The build matches the committed checksum. |
+| `no checksum committed for v0.1 yet` | Nothing to check against yet. Once the rows have been reviewed, put the printed `sha256` and `rows` in `datasets.yaml` in a PR. |
+| `MISMATCH` | The rows differ from the committed ones. The new build is kept as `processed/v0.1.mismatch.parquet`, and `v0.1.parquet` is left as it was. If you changed the rows on purpose (extraction code, raw data, a pyarrow upgrade in `uv.lock`), put the new `sha256` and `rows` in `datasets.yaml` in the same PR. If not, `make data OFFLINE=1` rules out the raw files; then compare the two files. |
+| `validation error(s); nothing written` | A row breaks a check in `validate.py`. Each line gives the check number and the row id. Warnings are summed up per check and don't stop the build. |
+| `row(s) don't match the schema` | A line in a row file isn't a valid row. The message gives the file and line. |
+| `no row files in data/interim/` | Extraction hasn't run, or isn't part of `make dataset` yet. |
+
+To read the dataset in code, `load_pairs("v0.1")` from `sandhi_probe.data.dataset` checks the SHA-256 first, then returns the rows as `Pair` objects. `pd.read_parquet("data/processed/v0.1.parquet")` works too but skips that check.
 
 ## When `make data` fails
 
