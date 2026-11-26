@@ -74,6 +74,10 @@ Each `rule_ids` key maps to its group and its Pāṇini sūtra. The list grows a
 - **How:** hash `sentence_id` to pick train / dev / test (80/10/10). Same sentence always gets the same split, and adding data later doesn't reshuffle old rows.
 - **Repeated words:** a common `fused` form like `tadapi` can still land in more than one split. That's fine for SBDS. The probe experiments drop any row whose `fused` form already appears in train.
 
+## File
+
+`make dataset` writes the rows to `data/processed/v0.1.parquet` (#5), one Parquet row per row above, sorted by `id`. The columns are the row fields in the order listed. `junctions` is a list of structs with the junction fields, `boundary_level` included, and `span` is a fixed-size list of two int32s. The exact column types are `SCHEMA` in `src/sandhi_probe/data/dataset.py`, and the file's SHA-256 is committed in `data/datasets.yaml` ([data/README.md](../data/README.md#building-the-dataset)).
+
 ## Still open
 
 - Scoring criterion (#41) may add fields.

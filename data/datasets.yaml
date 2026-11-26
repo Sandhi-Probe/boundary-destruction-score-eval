@@ -1,0 +1,13 @@
+# The datasets `make dataset` builds in data/processed/, and the SHA-256 each build has to
+# match (#5). The bytes depend only on the rows and the pyarrow version in uv.lock, so a
+# fresh clone rebuilds each file exactly. data/README.md explains the command.
+#
+# sha256 and rows stay null until extraction (#23) is part of `make dataset` and its rows
+# have been reviewed. After that, anything that changes the rows (the raw data, the
+# extraction code, this builder, a pyarrow upgrade) changes the checksum: put the new values
+# here in the same PR, so the change shows up in review.
+
+datasets:
+  v0.1:
+    sha256: null
+    rows: null

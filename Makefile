@@ -29,6 +29,11 @@ format: ## Auto-fix lint issues and format code
 	uv run ruff check --fix .
 	uv run ruff format .
 
+.PHONY: dataset
+dataset: data ## Build data/processed/v0.1.parquet and check it against data/datasets.yaml
+	@# extraction (#23) goes here, writing its rows to data/interim/*.jsonl
+	uv run --no-sync python -m sandhi_probe.data.dataset
+
 figures: ## Regenerate every figure from data/processed
 	@echo "make figures: not implemented yet (no results to plot)."
 
