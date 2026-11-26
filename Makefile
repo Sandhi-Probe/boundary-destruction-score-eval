@@ -22,7 +22,7 @@ data: ## Download raw corpora and verify checksums (OFFLINE=1: verify only)
 check: ## Lint, format check and tests (run before every PR)
 	uv run ruff check .
 	uv run ruff format --check .
-	@# type checker goes here (#16)
+	uv run mypy src/sandhi_probe
 	uv run pytest
 
 format: ## Auto-fix lint issues and format code
