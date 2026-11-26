@@ -22,6 +22,7 @@ class RuleId(StrEnum):
     VISARGA_O = "visarga_o"
     VISARGA_O_AVAGRAHA = "visarga_o_avagraha"
     VISARGA_DROP = "visarga_drop"
+    VISARGA_R = "visarga_r"
 
 
 class Rule(NamedTuple):
@@ -39,6 +40,7 @@ RULES: dict[RuleId, Rule] = {
     RuleId.VISARGA_O: Rule(RuleClass.VISARGA, "6.1.114"),
     RuleId.VISARGA_O_AVAGRAHA: Rule(RuleClass.VISARGA, "6.1.113"),
     RuleId.VISARGA_DROP: Rule(RuleClass.VISARGA, "8.3.19"),
+    RuleId.VISARGA_R: Rule(RuleClass.VISARGA, "8.2.66"),
 }
 
 

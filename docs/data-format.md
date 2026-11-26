@@ -25,6 +25,8 @@ All text and positions are in SLP1 (team decision).
 | `is_control` | bool | true for control rows where nothing changes at the join | `false` |
 | `split_assignment` | str | train / dev / test | `train` |
 
+`fused` only shows the changes its junctions label. If a word outside the row changed the first or last word, that word keeps its `split_parts` form: `sampAdayitrIM SiKarEH`, not `sampAdayitrIM SiKarEr`.
+
 ## Junction fields
 
 | field | type | meaning | example (`tadapi`) |
@@ -61,8 +63,9 @@ Each `rule_ids` key maps to its group and its Pāṇini sūtra. The list grows a
 | `visarga_o` | visarga | 6.1.114 | `aH → o` before a voiced consonant: `rAmaH + gacCati → rAmo gacCati` |
 | `visarga_o_avagraha` | visarga | 6.1.113 | `aH + a → o '`: `rAmaH + atra → rAmo 'tra` |
 | `visarga_drop` | visarga | 8.3.19 | `H` drops before a vowel: `rAmaH + udakam → rAma udakam`. Optional: 8.3.17 first makes it `y`, and `rAmay udakam` is also valid |
+| `visarga_r` | visarga | 8.2.66 | `H → r` before a voiced sound: `muniH + gacCati → munir gacCati` |
 
-The visarga rules come from the grammar, not from extracted data yet. Adjust them once #23 runs. Sūtra numbers were checked against the [ashtadhyayi.com dataset](https://github.com/ashtadhyayi-com/data).
+`visarga_r` was added after #23's test run found it. The other visarga rules come from the grammar. Sūtra numbers were checked against the [ashtadhyayi.com dataset](https://github.com/ashtadhyayi-com/data).
 
 ## Split rule
 
